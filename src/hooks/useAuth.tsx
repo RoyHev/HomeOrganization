@@ -10,12 +10,18 @@ import {
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
+export interface AuthErrorResult {
+  message: string
+  code: string | null
+}
+
 interface AuthContextValue {
   user: User | null
   session: Session | null
   loading: boolean
-  signUp: (email: string, password: string, displayName: string) => Promise<{ error: string | null }>
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
+  signUp: (email: string, password: string, displayName: string) => Promise<AuthErrorResult | null>
+  signIn: (email: string, password: string) => Promise<AuthErrorResult | null>
+  resetPassword: (email: string) => Promise<AuthErrorResult | null>
   signOut: () => Promise<void>
 }
 
@@ -51,14 +57,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         password,
         options: { data: { display_name: displayName } },
       })
-      return { error: error?.message ?? null }
+      if (!error) return null
+      return { message: error.message, code: error.code ?? null }
     },
     [],
   )
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    return { error: error?.message ?? null }
+    if (!error) return null
+    return { message: error.message, code: error.code ?? null }
+  }, [])
+
+  const resetPassword = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    })
+    if (!error) return null
+    return { message: error.message, code: error.code ?? null }
   }, [])
 
   const signOut = useCallback(async () => {
@@ -66,8 +82,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, session, loading, signUp, signIn, signOut }),
-    [user, session, loading, signUp, signIn, signOut],
+    () => ({ user, session, loading, signUp, signIn, resetPassword, signOut }),
+    [user, session, loading, signUp, signIn, resetPassword, signOut],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

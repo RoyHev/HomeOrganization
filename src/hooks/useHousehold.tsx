@@ -81,21 +81,29 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
       }
 
       const inviteCode = generateInviteCode()
-      const { data: newHousehold, error: householdError } = await supabase
-        .from('households')
-        .insert({ name, invite_code: inviteCode })
-        .select()
-        .single()
-
-      if (householdError || !newHousehold) {
-        return { error: householdError?.message ?? 'Failed to create household' }
-      }
-
       const displayName =
         (user.user_metadata?.display_name as string | undefined) ?? user.email?.split('@')[0] ?? 'Member'
 
+      // Insert without .select() — returning rows would fail RLS before membership exists
+      const { error: householdError } = await supabase
+        .from('households')
+        .insert({ name, invite_code: inviteCode })
+
+      if (householdError) {
+        return { error: householdError.message }
+      }
+
+      const { data: householdId, error: lookupError } = await supabase.rpc(
+        'lookup_household_by_invite',
+        { p_invite_code: inviteCode },
+      )
+
+      if (lookupError || !householdId) {
+        return { error: lookupError?.message ?? 'Failed to create household' }
+      }
+
       const { error: memberError } = await supabase.from('household_members').insert({
-        household_id: newHousehold.id,
+        household_id: householdId,
         user_id: user.id,
         role: 'owner',
         display_name: displayName,
@@ -105,7 +113,7 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         return { error: memberError.message }
       }
 
-      await supabase.rpc('seed_household_categories', { p_household_id: newHousehold.id })
+      await supabase.rpc('seed_household_categories', { p_household_id: householdId })
 
       await fetchHousehold()
       return { error: null }

@@ -21,9 +21,9 @@ export function SignUpPage() {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
-    const { error: err } = await signUp(email, password, displayName)
-    if (err) {
-      setError(err)
+    const result = await signUp(email, password, displayName)
+    if (result) {
+      setError(result.message)
     } else {
       setSuccess(true)
     }

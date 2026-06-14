@@ -8,12 +8,35 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { isSupabaseConfigured } from '@/lib/supabase'
 
+function getLoginErrorMessage(error: { message: string; code: string | null }): string {
+  if (error.code === 'email_not_confirmed') {
+    return 'Email not confirmed. Check your inbox or ask an admin to confirm your account in Supabase.'
+  }
+  if (error.message === 'Invalid login credentials') {
+    return 'Invalid email or password. If you were invited, you must set a password via the invite email first — or use Reset password below.'
+  }
+  return error.message
+}
+
+function getSupabaseProjectRef(): string | null {
+  const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
+  if (!url) return null
+  try {
+    return new URL(url).hostname.split('.')[0] ?? null
+  } catch {
+    return null
+  }
+}
+
 export function LoginPage() {
-  const { user, signIn, loading } = useAuth()
+  const { user, signIn, resetPassword, loading } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [resetSent, setResetSent] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const projectRef = getSupabaseProjectRef()
 
   if (!loading && user) return <Navigate to="/" replace />
 
@@ -21,9 +44,26 @@ export function LoginPage() {
     e.preventDefault()
     setSubmitting(true)
     setError(null)
-    const { error: err } = await signIn(email, password)
-    if (err) setError(err)
+    const result = await signIn(email, password)
+    if (result) setError(getLoginErrorMessage(result))
     setSubmitting(false)
+  }
+
+  const handleResetPassword = async () => {
+    if (!email.trim()) {
+      setError('Enter your email above, then click Reset password.')
+      return
+    }
+    setResetting(true)
+    setError(null)
+    setResetSent(false)
+    const result = await resetPassword(email.trim())
+    if (result) {
+      setError(result.message)
+    } else {
+      setResetSent(true)
+    }
+    setResetting(false)
   }
 
   return (
@@ -72,10 +112,32 @@ export function LoginPage() {
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
+            {resetSent && (
+              <p className="text-sm text-muted-foreground">
+                Password reset email sent. Check your inbox, set a new password, then sign in here.
+              </p>
+            )}
             <Button type="submit" className="w-full" disabled={submitting}>
               {submitting ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>
+          <div className="mt-3 flex flex-col gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="w-full"
+              disabled={resetting}
+              onClick={() => void handleResetPassword()}
+            >
+              {resetting ? 'Sending reset email…' : 'Reset password'}
+            </Button>
+          </div>
+          {import.meta.env.DEV && projectRef && (
+            <p className="mt-3 text-center text-xs text-muted-foreground">
+              Dev: connected to Supabase project <span className="font-mono">{projectRef}</span>
+            </p>
+          )}
           <p className="mt-4 text-center text-sm text-muted-foreground">
             Contact your household admin to get access.
           </p>
