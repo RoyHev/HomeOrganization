@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
 import { ArrowLeft, Building2, Shield, Trash2, UserPlus, Users } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import { invokeEdgeFunction } from '@/lib/functions'
 import { useAuth } from '@/hooks/useAuth'
 import { usePlatformAdmin } from '@/hooks/usePlatformAdmin'
 import { useHousehold } from '@/hooks/useHousehold'
@@ -110,28 +111,30 @@ export function PlatformAdminPage() {
     setError(null)
     setSuccess(null)
 
-    const { data, error: fnError } = await supabase.functions.invoke('platform-admin-create-user', {
-      body: {
-        email: userEmail.trim(),
-        password: userPassword,
-        display_name: userDisplayName.trim() || undefined,
-        household_id: userHouseholdId === 'none' ? undefined : userHouseholdId,
-        role: userRole,
-      },
+    const { data, error: invokeError } = await invokeEdgeFunction<{
+      user_id?: string
+      invited?: boolean
+      error?: string
+    }>('platform-admin-create-user', {
+      email: userEmail.trim(),
+      password: userPassword,
+      display_name: userDisplayName.trim() || undefined,
+      household_id: userHouseholdId === 'none' ? undefined : userHouseholdId,
+      role: userRole,
     })
 
-    if (fnError) {
+    if (invokeError) {
       setError(
-        fnError.message.includes('Failed to send a request to the Edge Function')
+        invokeError.includes('Failed to send a request to the Edge Function')
           ? 'User creation requires the platform-admin-create-user Edge Function. Deploy it from supabase/functions (see README).'
-          : fnError.message,
+          : invokeError,
       )
       setCreatingUser(false)
       return
     }
 
-    if (data?.error) {
-      setError(data.error)
+    if (!data) {
+      setError('User creation failed with no response.')
       setCreatingUser(false)
       return
     }
@@ -183,22 +186,23 @@ export function PlatformAdminPage() {
     setError(null)
     setSuccess(null)
 
-    const { data, error: fnError } = await supabase.functions.invoke('platform-admin-delete-user', {
-      body: { user_id: userToDelete.user_id },
-    })
+    const { data, error: invokeError } = await invokeEdgeFunction<{ deleted?: boolean; error?: string }>(
+      'platform-admin-delete-user',
+      { user_id: userToDelete.user_id },
+    )
 
-    if (fnError) {
+    if (invokeError) {
       setError(
-        fnError.message.includes('Failed to send a request to the Edge Function')
+        invokeError.includes('Failed to send a request to the Edge Function')
           ? 'User deletion requires the platform-admin-delete-user Edge Function. Deploy it from supabase/functions (see README).'
-          : fnError.message,
+          : invokeError,
       )
       setDeletingUser(false)
       return
     }
 
-    if (data?.error) {
-      setError(data.error)
+    if (!data) {
+      setError('User deletion failed with no response.')
       setDeletingUser(false)
       return
     }

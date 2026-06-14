@@ -76,25 +76,119 @@ Deno.serve(async (req) => {
     )
     const setPasswordUrl = `${appUrl}/set-password`
 
+    async function findUserByEmail(targetEmail: string) {
+      let page = 1
+      while (page <= 10) {
+        const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: 1000 })
+        if (error || !data?.users?.length) return null
+        const match = data.users.find((u) => u.email?.toLowerCase() === targetEmail)
+        if (match) return match
+        if (data.users.length < 1000) break
+        page++
+      }
+      return null
+    }
+
+    async function removeExistingUser(targetEmail: string) {
+      const existing = await findUserByEmail(targetEmail)
+      if (!existing) return null
+      const { error } = await adminClient.auth.admin.deleteUser(existing.id)
+      if (error) return error.message
+      return null
+    }
+
+    function isDuplicateEmailError(message: string | undefined): boolean {
+      if (!message) return false
+      const lower = message.toLowerCase()
+      return (
+        lower.includes('already') ||
+        lower.includes('registered') ||
+        lower.includes('exists') ||
+        lower.includes('duplicate')
+      )
+    }
+
     let userId: string
 
     if (password.length > 0) {
-      const { data, error } = await adminClient.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-        user_metadata: displayName ? { display_name: displayName } : undefined,
-      })
+      const existing = await findUserByEmail(email)
+      if (existing) {
+        const { data, error } = await adminClient.auth.admin.updateUserById(existing.id, {
+          password,
+          email_confirm: true,
+          user_metadata: {
+            ...(existing.user_metadata ?? {}),
+            ...(displayName ? { display_name: displayName } : {}),
+            must_set_password: false,
+          },
+        })
 
-      if (error || !data.user) {
-        return new Response(JSON.stringify({ error: error?.message ?? 'Failed to create user' }), {
+        if (error || !data.user) {
+          return new Response(
+            JSON.stringify({ error: error?.message ?? 'Failed to update existing user' }),
+            {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            },
+          )
+        }
+
+        userId = data.user.id
+      } else {
+        const { data, error } = await adminClient.auth.admin.createUser({
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: displayName ? { display_name: displayName } : undefined,
+        })
+
+        if (error || !data.user) {
+          if (!isDuplicateEmailError(error?.message)) {
+            return new Response(JSON.stringify({ error: error?.message ?? 'Failed to create user' }), {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            })
+          }
+
+          const cleanupError = await removeExistingUser(email)
+          if (cleanupError) {
+            return new Response(JSON.stringify({ error: cleanupError }), {
+              status: 400,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            })
+          }
+
+          const retry = await adminClient.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: displayName ? { display_name: displayName } : undefined,
+          })
+
+          if (retry.error || !retry.data.user) {
+            return new Response(
+              JSON.stringify({ error: retry.error?.message ?? error?.message ?? 'Failed to create user' }),
+              {
+                status: 400,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              },
+            )
+          }
+
+          userId = retry.data.user.id
+        } else {
+          userId = data.user.id
+        }
+      }
+    } else {
+      const cleanupError = await removeExistingUser(email)
+      if (cleanupError) {
+        return new Response(JSON.stringify({ error: cleanupError }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
 
-      userId = data.user.id
-    } else {
       const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
         redirectTo: setPasswordUrl,
         data: {
