@@ -3,12 +3,14 @@ import { BottomNav } from './BottomNav'
 import { useAuth } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
 import { LoadingSpinner } from '@/components/ui/empty-state'
-import { LogOut, Settings } from 'lucide-react'
+import { LogOut, Settings, Shield } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { usePlatformAdmin } from '@/hooks/usePlatformAdmin'
 
 export function AppShell() {
   const { user, signOut } = useAuth()
   const { household, membership, loading } = useHousehold()
+  const { isPlatformAdmin } = usePlatformAdmin()
   const navigate = useNavigate()
 
   if (loading) return <LoadingSpinner />
@@ -26,6 +28,16 @@ export function AppShell() {
             <h1 className="text-base font-semibold">{household.name}</h1>
           </div>
           <div className="flex items-center gap-1">
+            {isPlatformAdmin && (
+              <Button
+                variant="ghost"
+                size="icon"
+                title="Platform admin"
+                onClick={() => navigate('/platform-admin')}
+              >
+                <Shield className="h-5 w-5" />
+              </Button>
+            )}
             {isOwner && (
               <Button
                 variant="ghost"

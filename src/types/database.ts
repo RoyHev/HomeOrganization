@@ -364,6 +364,50 @@ export type Database = {
         Args: Record<PropertyKey, never>
         Returns: string
       }
+      is_platform_admin: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+      platform_admin_list_households: {
+        Args: Record<PropertyKey, never>
+        Returns: Array<{
+          id: string
+          name: string
+          invite_code: string
+          member_count: number
+          created_at: string
+        }>
+      }
+      platform_admin_list_users: {
+        Args: Record<PropertyKey, never>
+        Returns: Array<{
+          user_id: string
+          email: string
+          display_name: string | null
+          household_id: string | null
+          household_name: string | null
+          role: string | null
+          email_confirmed_at: string | null
+          created_at: string
+        }>
+      }
+      platform_admin_create_household: {
+        Args: { p_name: string; p_owner_email: string }
+        Returns: Array<{ household_id: string; invite_code: string }>
+      }
+      platform_admin_add_user_to_household: {
+        Args: {
+          p_household_id: string
+          p_email: string
+          p_role?: string
+          p_display_name?: string | null
+        }
+        Returns: string
+      }
+      create_household: {
+        Args: { p_name: string; p_invite_code: string }
+        Returns: string
+      }
     }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>

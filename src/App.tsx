@@ -9,16 +9,20 @@ import { ShoppingPage } from '@/features/shopping/ShoppingPage'
 import { RecipesPage } from '@/features/recipes/RecipesPage'
 import { SupplyPage } from '@/features/supply/SupplyPage'
 import { AdminPage } from '@/features/admin/AdminPage'
+import { PlatformAdminPage } from '@/features/platform-admin/PlatformAdminPage'
+import { PlatformAdminProvider } from '@/hooks/usePlatformAdmin'
 
 export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <HouseholdProvider>
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/household" element={<HouseholdSetupPage />} />
-            <Route element={<AppShell />}>
+        <PlatformAdminProvider>
+          <HouseholdProvider>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/household" element={<HouseholdSetupPage />} />
+              <Route path="/platform-admin" element={<PlatformAdminPage />} />
+              <Route element={<AppShell />}>
               <Route index element={<Navigate to="/pantry" replace />} />
               <Route path="/pantry" element={<PantryPage />} />
               <Route path="/shopping" element={<ShoppingPage />} />
@@ -29,6 +33,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/pantry" replace />} />
           </Routes>
         </HouseholdProvider>
+        </PlatformAdminProvider>
       </AuthProvider>
     </BrowserRouter>
   )

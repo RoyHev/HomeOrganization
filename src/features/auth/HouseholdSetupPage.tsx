@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
-import { Users, Plus } from 'lucide-react'
+import { Link, Navigate } from 'react-router-dom'
+import { Users, Plus, Shield } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
+import { usePlatformAdmin } from '@/hooks/usePlatformAdmin'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -12,6 +13,7 @@ import { LoadingSpinner } from '@/components/ui/empty-state'
 export function HouseholdSetupPage() {
   const { user, loading: authLoading } = useAuth()
   const { household, createHousehold, joinHousehold, loading } = useHousehold()
+  const { isPlatformAdmin } = usePlatformAdmin()
   const [mode, setMode] = useState<'choose' | 'create' | 'join'>('choose')
   const [householdName, setHouseholdName] = useState('')
   const [inviteCode, setInviteCode] = useState('')
@@ -64,6 +66,14 @@ export function HouseholdSetupPage() {
                 <Users className="h-5 w-5" />
                 Join with invite code
               </Button>
+              {isPlatformAdmin && (
+                <Button variant="secondary" className="w-full justify-start gap-3" asChild>
+                  <Link to="/platform-admin">
+                    <Shield className="h-5 w-5" />
+                    Platform admin
+                  </Link>
+                </Button>
+              )}
             </div>
           )}
 

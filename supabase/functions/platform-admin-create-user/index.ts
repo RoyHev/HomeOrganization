@@ -1,0 +1,146 @@
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Missing authorization' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+    })
+
+    const {
+      data: { user: caller },
+      error: userError,
+    } = await userClient.auth.getUser()
+
+    if (userError || !caller) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const { data: isAdmin, error: adminError } = await userClient.rpc('is_platform_admin')
+    if (adminError || !isAdmin) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const body = await req.json()
+    const email = String(body.email ?? '').trim().toLowerCase()
+    const password = String(body.password ?? '')
+    const displayName = String(body.display_name ?? '').trim()
+    const householdId = body.household_id ? String(body.household_id) : null
+    const role = body.role === 'owner' ? 'owner' : 'member'
+
+    if (!email) {
+      return new Response(JSON.stringify({ error: 'Email is required' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    if (password.length > 0 && password.length < 6) {
+      return new Response(JSON.stringify({ error: 'Password must be at least 6 characters' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const adminClient = createClient(supabaseUrl, serviceRoleKey)
+
+    let userId: string
+
+    if (password.length > 0) {
+      const { data, error } = await adminClient.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: displayName ? { display_name: displayName } : undefined,
+      })
+
+      if (error || !data.user) {
+        return new Response(JSON.stringify({ error: error?.message ?? 'Failed to create user' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      userId = data.user.id
+    } else {
+      const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+        data: displayName ? { display_name: displayName } : undefined,
+      })
+
+      if (error || !data.user) {
+        return new Response(JSON.stringify({ error: error?.message ?? 'Failed to invite user' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+
+      userId = data.user.id
+    }
+
+    if (householdId) {
+      const { error: memberError } = await userClient.rpc('platform_admin_add_user_to_household', {
+        p_household_id: householdId,
+        p_email: email,
+        p_role: role,
+        p_display_name: displayName || null,
+      })
+
+      if (memberError) {
+        return new Response(
+          JSON.stringify({
+            error: memberError.message,
+            user_id: userId,
+            partial: true,
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          },
+        )
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        user_id: userId,
+        invited: password.length === 0,
+      }),
+      {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      },
+    )
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unexpected error'
+    return new Response(JSON.stringify({ error: message }), {
+      status: 500,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+})
