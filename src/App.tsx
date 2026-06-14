@@ -1,0 +1,35 @@
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { AuthProvider } from '@/hooks/useAuth'
+import { HouseholdProvider } from '@/hooks/useHousehold'
+import { AppShell } from '@/components/layout/AppShell'
+import { LoginPage } from '@/features/auth/LoginPage'
+import { HouseholdSetupPage } from '@/features/auth/HouseholdSetupPage'
+import { PantryPage } from '@/features/pantry/PantryPage'
+import { ShoppingPage } from '@/features/shopping/ShoppingPage'
+import { RecipesPage } from '@/features/recipes/RecipesPage'
+import { SupplyPage } from '@/features/supply/SupplyPage'
+import { AdminPage } from '@/features/admin/AdminPage'
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AuthProvider>
+        <HouseholdProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/household" element={<HouseholdSetupPage />} />
+            <Route element={<AppShell />}>
+              <Route index element={<Navigate to="/pantry" replace />} />
+              <Route path="/pantry" element={<PantryPage />} />
+              <Route path="/shopping" element={<ShoppingPage />} />
+              <Route path="/recipes" element={<RecipesPage />} />
+              <Route path="/supply" element={<SupplyPage />} />
+              <Route path="/admin" element={<AdminPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/pantry" replace />} />
+          </Routes>
+        </HouseholdProvider>
+      </AuthProvider>
+    </BrowserRouter>
+  )
+}
