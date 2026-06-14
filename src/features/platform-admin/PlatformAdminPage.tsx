@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, Navigate } from 'react-router-dom'
-import { ArrowLeft, Building2, Shield, UserPlus, Users } from 'lucide-react'
+import { ArrowLeft, Building2, Shield, Trash2, UserPlus, Users } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { usePlatformAdmin } from '@/hooks/usePlatformAdmin'
@@ -11,6 +11,13 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/ui/empty-state'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   Select,
   SelectContent,
@@ -39,7 +46,7 @@ type UserRow = {
 }
 
 export function PlatformAdminPage() {
-  const { user } = useAuth()
+  const { user, needsPasswordSetup } = useAuth()
   const { household } = useHousehold()
   const { isPlatformAdmin, loading: adminLoading } = usePlatformAdmin()
   const [households, setHouseholds] = useState<HouseholdRow[]>([])
@@ -58,6 +65,9 @@ export function PlatformAdminPage() {
   const [householdName, setHouseholdName] = useState('')
   const [ownerEmail, setOwnerEmail] = useState('')
   const [creatingHousehold, setCreatingHousehold] = useState(false)
+
+  const [userToDelete, setUserToDelete] = useState<UserRow | null>(null)
+  const [deletingUser, setDeletingUser] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -91,6 +101,7 @@ export function PlatformAdminPage() {
 
   if (adminLoading) return <LoadingSpinner />
   if (!user) return <Navigate to="/login" replace />
+  if (needsPasswordSetup) return <Navigate to="/set-password" replace />
   if (!isPlatformAdmin) return <Navigate to="/pantry" replace />
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -164,6 +175,38 @@ export function PlatformAdminPage() {
     setOwnerEmail('')
     await loadData()
     setCreatingHousehold(false)
+  }
+
+  const handleDeleteUser = async () => {
+    if (!userToDelete) return
+    setDeletingUser(true)
+    setError(null)
+    setSuccess(null)
+
+    const { data, error: fnError } = await supabase.functions.invoke('platform-admin-delete-user', {
+      body: { user_id: userToDelete.user_id },
+    })
+
+    if (fnError) {
+      setError(
+        fnError.message.includes('Failed to send a request to the Edge Function')
+          ? 'User deletion requires the platform-admin-delete-user Edge Function. Deploy it from supabase/functions (see README).'
+          : fnError.message,
+      )
+      setDeletingUser(false)
+      return
+    }
+
+    if (data?.error) {
+      setError(data.error)
+      setDeletingUser(false)
+      return
+    }
+
+    setSuccess(`User ${userToDelete.email} deleted.`)
+    setUserToDelete(null)
+    await loadData()
+    setDeletingUser(false)
   }
 
   if (loading) return <LoadingSpinner />
@@ -323,20 +366,36 @@ export function PlatformAdminPage() {
           </CardHeader>
           <CardContent className="p-0">
             <ul className="divide-y">
-              {users.map((u) => (
-                <li key={u.user_id} className="px-4 py-3">
-                  <p className="font-medium truncate">{u.display_name ?? u.email}</p>
-                  <p className="text-xs text-muted-foreground truncate">{u.email}</p>
-                  <div className="mt-1 flex flex-wrap gap-2">
-                    {u.household_name ? (
-                      <Badge variant="secondary">{u.household_name}</Badge>
-                    ) : (
-                      <Badge variant="outline">No household</Badge>
-                    )}
-                    {!u.email_confirmed_at && <Badge variant="outline">Unconfirmed</Badge>}
-                  </div>
-                </li>
-              ))}
+              {users.map((u) => {
+                const isSelf = u.user_id === user?.id
+                return (
+                  <li key={u.user_id} className="flex items-start gap-3 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium truncate">{u.display_name ?? u.email}</p>
+                      <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {u.household_name ? (
+                          <Badge variant="secondary">{u.household_name}</Badge>
+                        ) : (
+                          <Badge variant="outline">No household</Badge>
+                        )}
+                        {!u.email_confirmed_at && <Badge variant="outline">Unconfirmed</Badge>}
+                        {isSelf && <Badge variant="outline">You</Badge>}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="shrink-0 text-destructive hover:text-destructive"
+                      title={isSelf ? 'You cannot delete your own account' : 'Delete user'}
+                      disabled={isSelf}
+                      onClick={() => setUserToDelete(u)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </li>
+                )
+              })}
             </ul>
           </CardContent>
         </Card>
@@ -367,6 +426,40 @@ export function PlatformAdminPage() {
           </CardContent>
         </Card>
       </main>
+
+      <Dialog open={!!userToDelete} onOpenChange={(open) => !open && setUserToDelete(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete user?</DialogTitle>
+            <DialogDescription>
+              {userToDelete && (
+                <>
+                  This will permanently delete <strong>{userToDelete.email}</strong> and remove
+                  them from their household. This cannot be undone.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="flex-1"
+              disabled={deletingUser}
+              onClick={() => setUserToDelete(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="flex-1"
+              disabled={deletingUser}
+              onClick={() => void handleDeleteUser()}
+            >
+              {deletingUser ? 'Deleting…' : 'Delete user'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

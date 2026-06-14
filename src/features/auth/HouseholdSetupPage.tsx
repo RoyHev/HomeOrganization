@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { LoadingSpinner } from '@/components/ui/empty-state'
 
 export function HouseholdSetupPage() {
-  const { user, loading: authLoading } = useAuth()
+  const { user, loading: authLoading, needsPasswordSetup } = useAuth()
   const { household, createHousehold, joinHousehold, loading } = useHousehold()
   const { isPlatformAdmin } = usePlatformAdmin()
   const [mode, setMode] = useState<'choose' | 'create' | 'join'>('choose')
@@ -22,6 +22,7 @@ export function HouseholdSetupPage() {
 
   if (authLoading || loading) return <LoadingSpinner />
   if (!user) return <Navigate to="/login" replace />
+  if (needsPasswordSetup) return <Navigate to="/set-password" replace />
   if (household) return <Navigate to="/pantry" replace />
 
   const handleCreate = async (e: React.FormEvent) => {

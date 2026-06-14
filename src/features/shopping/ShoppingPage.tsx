@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Plus, ShoppingCart, Check } from 'lucide-react'
-import { useShoppingList } from '@/hooks/useShoppingList'
+import { useShoppingList, type ShoppingListItemWithMeta } from '@/hooks/useShoppingList'
 import { useCategories } from '@/hooks/useCategories'
-import type { ShoppingListItemWithMeta } from '@/hooks/useShoppingList'
+import type { ShoppingListL1 } from '@/types/database'
 import { formatQuantity } from '@/lib/utils'
 import { UNITS } from '@/lib/constants'
 import { Button } from '@/components/ui/button'
@@ -51,8 +51,17 @@ export function ShoppingPage() {
   const grouped = useMemo(() => {
     const pantry = filteredItems.filter((i) => i.l1 === 'pantry')
     const supply = filteredItems.filter((i) => i.l1 === 'supply')
-    return { pantry, supply }
+    const general = filteredItems.filter((i) => i.l1 === 'general')
+    return { pantry, supply, general }
   }, [filteredItems])
+
+  const handleItemCheck = (item: ShoppingListItemWithMeta) => {
+    if (item.l1 === 'general') {
+      void completePurchase(item, 0, false)
+      return
+    }
+    openPurchase(item)
+  }
 
   const openPurchase = (item: ShoppingListItemWithMeta) => {
     setPurchaseItem(item)
@@ -96,6 +105,7 @@ export function ShoppingPage() {
             <SelectItem value="all">All items</SelectItem>
             <SelectItem value="pantry">Pantry</SelectItem>
             <SelectItem value="supply">Supply</SelectItem>
+            <SelectItem value="general">Other</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -115,10 +125,13 @@ export function ShoppingPage() {
       ) : (
         <div className="space-y-6">
           {grouped.pantry.length > 0 && (l1Filter === 'all' || l1Filter === 'pantry') && (
-            <ShoppingGroup title="Pantry" items={grouped.pantry} onPurchase={openPurchase} />
+            <ShoppingGroup title="Pantry" items={grouped.pantry} onCheck={handleItemCheck} />
           )}
           {grouped.supply.length > 0 && (l1Filter === 'all' || l1Filter === 'supply') && (
-            <ShoppingGroup title="Supply" items={grouped.supply} onPurchase={openPurchase} />
+            <ShoppingGroup title="Supply" items={grouped.supply} onCheck={handleItemCheck} />
+          )}
+          {grouped.general.length > 0 && (l1Filter === 'all' || l1Filter === 'general') && (
+            <ShoppingGroup title="Other" items={grouped.general} onCheck={handleItemCheck} />
           )}
         </div>
       )}
@@ -136,8 +149,9 @@ export function ShoppingPage() {
           <DialogHeader>
             <DialogTitle>How many did you buy?</DialogTitle>
             <DialogDescription>
-              {purchaseItem?.name} will be added to your{' '}
-              {purchaseItem?.l1 === 'pantry' ? 'Pantry' : 'Supply Closet'}.
+              {purchaseItem?.l1 === 'pantry'
+                ? `${purchaseItem.name} will be added to your Pantry.`
+                : `${purchaseItem?.name} will be added to your Supply Closet.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -180,11 +194,11 @@ export function ShoppingPage() {
 function ShoppingGroup({
   title,
   items,
-  onPurchase,
+  onCheck,
 }: {
   title: string
   items: ShoppingListItemWithMeta[]
-  onPurchase: (item: ShoppingListItemWithMeta) => void
+  onCheck: (item: ShoppingListItemWithMeta) => void
 }) {
   return (
     <section>
@@ -205,8 +219,8 @@ function ShoppingGroup({
             <Button
               variant="outline"
               size="icon"
-              onClick={() => onPurchase(item)}
-              title="Mark as purchased"
+              onClick={() => onCheck(item)}
+              title={item.l1 === 'general' ? 'Check off' : 'Mark as purchased'}
             >
               <Check className="h-4 w-4" />
             </Button>
@@ -232,17 +246,18 @@ function AddItemDialog({
     name: string
     quantity: number
     unit: string
-    l1: 'pantry' | 'supply'
+    l1: ShoppingListL1
     category_id?: string | null
   }) => Promise<{ error: string | null }>
 }) {
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('1')
   const [unit, setUnit] = useState('each')
-  const [l1, setL1] = useState<'pantry' | 'supply'>('pantry')
+  const [l1, setL1] = useState<ShoppingListL1>('pantry')
   const [categoryId, setCategoryId] = useState('none')
 
   const categories = l1 === 'pantry' ? pantryCategories : supplyCategories
+  const isGeneral = l1 === 'general'
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -251,7 +266,7 @@ function AddItemDialog({
       quantity: parseFloat(quantity) || 1,
       unit,
       l1,
-      category_id: categoryId === 'none' ? null : categoryId,
+      category_id: isGeneral || categoryId === 'none' ? null : categoryId,
     })
     setName('')
     setQuantity('1')
@@ -271,15 +286,27 @@ function AddItemDialog({
           </div>
           <div className="space-y-2">
             <Label>Type</Label>
-            <Select value={l1} onValueChange={(v) => setL1(v as 'pantry' | 'supply')}>
+            <Select
+              value={l1}
+              onValueChange={(v) => {
+                setL1(v as ShoppingListL1)
+                setCategoryId('none')
+              }}
+            >
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="pantry">Pantry</SelectItem>
                 <SelectItem value="supply">Supply</SelectItem>
+                <SelectItem value="general">Other (list only)</SelectItem>
               </SelectContent>
             </Select>
+            {isGeneral && (
+              <p className="text-sm text-muted-foreground">
+                Won&apos;t be added to Pantry or Supply — just check off when done.
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="space-y-2">
@@ -308,22 +335,24 @@ function AddItemDialog({
               </Select>
             </div>
           </div>
-          <div className="space-y-2">
-            <Label>Category</Label>
-            <Select value={categoryId} onValueChange={setCategoryId}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {categories.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {!isGeneral && (
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select value={categoryId} onValueChange={setCategoryId}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           <Button type="submit" className="w-full">
             Add to list
           </Button>

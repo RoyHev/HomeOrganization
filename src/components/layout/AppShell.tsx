@@ -8,13 +8,14 @@ import { Button } from '@/components/ui/button'
 import { usePlatformAdmin } from '@/hooks/usePlatformAdmin'
 
 export function AppShell() {
-  const { user, signOut } = useAuth()
+  const { user, signOut, needsPasswordSetup } = useAuth()
   const { household, membership, loading } = useHousehold()
   const { isPlatformAdmin } = usePlatformAdmin()
   const navigate = useNavigate()
 
   if (loading) return <LoadingSpinner />
   if (!user) return <Navigate to="/login" replace />
+  if (needsPasswordSetup) return <Navigate to="/set-password" replace />
   if (!household) return <Navigate to="/household" replace />
 
   const isOwner = membership?.role === 'owner'

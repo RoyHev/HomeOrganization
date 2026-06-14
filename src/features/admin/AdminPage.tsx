@@ -203,9 +203,9 @@ export function AdminPage() {
               <strong className="text-foreground">Invite user</strong>
             </li>
             <li>Enter the new member&apos;s email address and send the invite</li>
-            <li>They receive an email and click the link to set their password</li>
+            <li>They receive an email, click the link, and are taken to a page to set their password</li>
             <li>
-              Share the invite code <strong className="text-foreground font-mono">{household?.invite_code}</strong> with them — they enter it when they log in for the first time
+              Share the invite code <strong className="text-foreground font-mono">{household?.invite_code}</strong> with them if they still need to join your household
             </li>
           </ol>
           <a

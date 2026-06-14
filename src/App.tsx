@@ -3,6 +3,7 @@ import { AuthProvider } from '@/hooks/useAuth'
 import { HouseholdProvider } from '@/hooks/useHousehold'
 import { AppShell } from '@/components/layout/AppShell'
 import { LoginPage } from '@/features/auth/LoginPage'
+import { SetPasswordPage } from '@/features/auth/SetPasswordPage'
 import { HouseholdSetupPage } from '@/features/auth/HouseholdSetupPage'
 import { PantryPage } from '@/features/pantry/PantryPage'
 import { ShoppingPage } from '@/features/shopping/ShoppingPage'
@@ -20,6 +21,7 @@ export default function App() {
           <HouseholdProvider>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/set-password" element={<SetPasswordPage />} />
               <Route path="/household" element={<HouseholdSetupPage />} />
               <Route path="/platform-admin" element={<PlatformAdminPage />} />
               <Route element={<AppShell />}>

@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { Home } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import { getAuthLinkType } from '@/lib/auth-utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,7 +30,8 @@ function getSupabaseProjectRef(): string | null {
 }
 
 export function LoginPage() {
-  const { user, signIn, resetPassword, loading } = useAuth()
+  const navigate = useNavigate()
+  const { user, signIn, resetPassword, loading, needsPasswordSetup } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -38,6 +40,14 @@ export function LoginPage() {
   const [resetting, setResetting] = useState(false)
   const projectRef = getSupabaseProjectRef()
 
+  useEffect(() => {
+    const type = getAuthLinkType()
+    if (type === 'invite' || type === 'recovery') {
+      navigate(`/set-password${window.location.search}${window.location.hash}`, { replace: true })
+    }
+  }, [navigate])
+
+  if (!loading && user && needsPasswordSetup) return <Navigate to="/set-password" replace />
   if (!loading && user) return <Navigate to="/" replace />
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -114,7 +124,7 @@ export function LoginPage() {
             {error && <p className="text-sm text-destructive">{error}</p>}
             {resetSent && (
               <p className="text-sm text-muted-foreground">
-                Password reset email sent. Check your inbox, set a new password, then sign in here.
+                Password reset email sent. Check your inbox and follow the link to set a new password.
               </p>
             )}
             <Button type="submit" className="w-full" disabled={submitting}>

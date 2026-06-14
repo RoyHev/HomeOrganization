@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
-import type { L1Category, ShoppingListItem } from '@/types/database'
+import type { L1Category, ShoppingListL1, ShoppingListItem } from '@/types/database'
 
 export type ShoppingListItemWithMeta = ShoppingListItem & {
   categories: { id: string; name: string } | null
@@ -66,7 +66,7 @@ export function useShoppingList() {
       name: string
       quantity: number
       unit: string
-      l1: L1Category
+      l1: ShoppingListL1
       inventory_item_id?: string | null
       category_id?: string | null
     }) => {
@@ -129,28 +129,32 @@ export function useShoppingList() {
     ) => {
       if (!household) return { error: 'No household' }
 
-      if (listItem.inventory_item_id) {
-        const { data: inv } = await supabase
-          .from('inventory_items')
-          .select('quantity')
-          .eq('id', listItem.inventory_item_id)
-          .single()
+      const isGeneral = listItem.l1 === 'general'
 
-        if (inv) {
-          await supabase
+      if (!isGeneral) {
+        if (listItem.inventory_item_id) {
+          const { data: inv } = await supabase
             .from('inventory_items')
-            .update({ quantity: Number(inv.quantity) + purchasedQuantity })
+            .select('quantity')
             .eq('id', listItem.inventory_item_id)
+            .single()
+
+          if (inv) {
+            await supabase
+              .from('inventory_items')
+              .update({ quantity: Number(inv.quantity) + purchasedQuantity })
+              .eq('id', listItem.inventory_item_id)
+          }
+        } else if (createInventoryIfMissing) {
+          await supabase.from('inventory_items').insert({
+            household_id: household.id,
+            l1: listItem.l1 as L1Category,
+            name: listItem.name,
+            quantity: purchasedQuantity,
+            unit: listItem.unit,
+            category_id: listItem.category_id,
+          })
         }
-      } else if (createInventoryIfMissing) {
-        await supabase.from('inventory_items').insert({
-          household_id: household.id,
-          l1: listItem.l1,
-          name: listItem.name,
-          quantity: purchasedQuantity,
-          unit: listItem.unit,
-          category_id: listItem.category_id,
-        })
       }
 
       await supabase.from('shopping_list_items').delete().eq('id', listItem.id)
@@ -158,7 +162,9 @@ export function useShoppingList() {
       const displayName =
         (user?.user_metadata?.display_name as string | undefined) ?? 'Someone'
       await logActivity(
-        `${displayName} bought ${purchasedQuantity} ${listItem.unit} of ${listItem.name}`,
+        isGeneral
+          ? `${displayName} checked off ${listItem.name}`
+          : `${displayName} bought ${purchasedQuantity} ${listItem.unit} of ${listItem.name}`,
       )
 
       await fetchItems()

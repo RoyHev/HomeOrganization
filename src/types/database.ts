@@ -7,6 +7,7 @@ export type Json =
   | Json[]
 
 export type L1Category = 'pantry' | 'supply'
+export type ShoppingListL1 = L1Category | 'general'
 export type HouseholdRole = 'owner' | 'member'
 
 export type Database = {
@@ -152,7 +153,7 @@ export type Database = {
         Row: {
           id: string
           household_id: string
-          l1: L1Category
+          l1: ShoppingListL1
           name: string
           quantity: number
           unit: string
@@ -164,7 +165,7 @@ export type Database = {
         Insert: {
           id?: string
           household_id: string
-          l1: L1Category
+          l1: ShoppingListL1
           name: string
           quantity?: number
           unit?: string
@@ -176,7 +177,7 @@ export type Database = {
         Update: {
           id?: string
           household_id?: string
-          l1?: L1Category
+          l1?: ShoppingListL1
           name?: string
           quantity?: number
           unit?: string

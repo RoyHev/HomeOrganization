@@ -70,6 +70,12 @@ Deno.serve(async (req) => {
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey)
 
+    const appUrl = (Deno.env.get('APP_URL') ?? Deno.env.get('SITE_URL') ?? 'http://localhost:5173').replace(
+      /\/$/,
+      '',
+    )
+    const setPasswordUrl = `${appUrl}/set-password`
+
     let userId: string
 
     if (password.length > 0) {
@@ -90,7 +96,11 @@ Deno.serve(async (req) => {
       userId = data.user.id
     } else {
       const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
-        data: displayName ? { display_name: displayName } : undefined,
+        redirectTo: setPasswordUrl,
+        data: {
+          ...(displayName ? { display_name: displayName } : {}),
+          must_set_password: true,
+        },
       })
 
       if (error || !data.user) {
