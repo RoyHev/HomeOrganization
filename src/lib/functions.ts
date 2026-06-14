@@ -1,48 +1,80 @@
-import {
-  FunctionsFetchError,
-  FunctionsHttpError,
-  FunctionsRelayError,
-} from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 
 type FunctionErrorPayload = {
   error?: string
   message?: string
+  msg?: string
 }
 
-async function readFunctionErrorMessage(error: FunctionsHttpError): Promise<string> {
-  try {
-    const payload = (await error.context.json()) as FunctionErrorPayload
-    if (typeof payload.error === 'string' && payload.error.trim()) return payload.error
-    if (typeof payload.message === 'string' && payload.message.trim()) return payload.message
-  } catch {
-    // Response body was not JSON — fall back to generic message below.
+function extractPayloadMessage(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object') return null
+  const record = payload as FunctionErrorPayload
+  for (const key of ['error', 'message', 'msg'] as const) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
   }
-  return error.message
+  return null
 }
 
 export async function invokeEdgeFunction<T>(
   functionName: string,
   body: Record<string, unknown>,
 ): Promise<{ data: T | null; error: string | null }> {
-  const { data, error } = await supabase.functions.invoke(functionName, { body })
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
+  const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
-  if (error instanceof FunctionsHttpError) {
-    return { data: null, error: await readFunctionErrorMessage(error) }
+  if (!supabaseUrl || !anonKey) {
+    return { data: null, error: 'Supabase is not configured.' }
   }
 
-  if (error instanceof FunctionsRelayError || error instanceof FunctionsFetchError) {
-    return { data: null, error: error.message }
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+
+  const accessToken = session?.access_token ?? anonKey
+
+  let response: Response
+  try {
+    response = await fetch(`${supabaseUrl}/functions/v1/${functionName}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        apikey: anonKey,
+      },
+      body: JSON.stringify(body),
+    })
+  } catch (fetchError) {
+    const message =
+      fetchError instanceof Error
+        ? fetchError.message
+        : 'Failed to send a request to the Edge Function'
+    return { data: null, error: message }
   }
 
-  if (error) {
-    return { data: null, error: error.message }
+  const text = await response.text()
+  let payload: unknown = null
+
+  if (text) {
+    try {
+      payload = JSON.parse(text) as unknown
+    } catch {
+      payload = text
+    }
   }
 
-  const result = data as (T & FunctionErrorPayload) | null
-  if (result && typeof result.error === 'string' && result.error.trim()) {
-    return { data: null, error: result.error }
+  if (!response.ok) {
+    const message =
+      extractPayloadMessage(payload) ??
+      (typeof payload === 'string' && payload.trim() ? payload.trim() : null) ??
+      `Request failed (${response.status} ${response.statusText})`
+    return { data: null, error: message }
   }
 
-  return { data: result as T | null, error: null }
+  const payloadError = extractPayloadMessage(payload)
+  if (payloadError) {
+    return { data: null, error: payloadError }
+  }
+
+  return { data: payload as T, error: null }
 }

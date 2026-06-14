@@ -5,6 +5,31 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+function jsonResponse(body: Record<string, unknown>, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+function isDuplicateEmailError(message: string | undefined): boolean {
+  if (!message) return false
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('already') ||
+    lower.includes('registered') ||
+    lower.includes('exists') ||
+    lower.includes('duplicate')
+  )
+}
+
+function asMetadataRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return {}
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -17,10 +42,7 @@ Deno.serve(async (req) => {
 
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Missing authorization' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: 'Missing authorization' }, 401)
     }
 
     const userClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -33,18 +55,12 @@ Deno.serve(async (req) => {
     } = await userClient.auth.getUser()
 
     if (userError || !caller) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: 'Unauthorized' }, 401)
     }
 
     const { data: isAdmin, error: adminError } = await userClient.rpc('is_platform_admin')
     if (adminError || !isAdmin) {
-      return new Response(JSON.stringify({ error: 'Forbidden' }), {
-        status: 403,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: 'Forbidden' }, 403)
     }
 
     const body = await req.json()
@@ -55,17 +71,11 @@ Deno.serve(async (req) => {
     const role = body.role === 'owner' ? 'owner' : 'member'
 
     if (!email) {
-      return new Response(JSON.stringify({ error: 'Email is required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: 'Email is required' }, 400)
     }
 
     if (password.length > 0 && password.length < 6) {
-      return new Response(JSON.stringify({ error: 'Password must be at least 6 characters' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse({ error: 'Password must be at least 6 characters' }, 400)
     }
 
     const adminClient = createClient(supabaseUrl, serviceRoleKey)
@@ -78,118 +88,77 @@ Deno.serve(async (req) => {
 
     async function findUserByEmail(targetEmail: string) {
       let page = 1
-      while (page <= 10) {
-        const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: 1000 })
-        if (error || !data?.users?.length) return null
-        const match = data.users.find((u) => u.email?.toLowerCase() === targetEmail)
-        if (match) return match
-        if (data.users.length < 1000) break
+      while (page <= 20) {
+        const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: 200 })
+        if (error) return { user: null, error: error.message }
+        const users = data?.users ?? []
+        const match = users.find((u) => u.email?.toLowerCase() === targetEmail)
+        if (match) return { user: match, error: null }
+        if (users.length < 200) break
         page++
       }
-      return null
+      return { user: null, error: null }
     }
 
-    async function removeExistingUser(targetEmail: string) {
-      const existing = await findUserByEmail(targetEmail)
-      if (!existing) return null
-      const { error } = await adminClient.auth.admin.deleteUser(existing.id)
-      if (error) return error.message
-      return null
-    }
-
-    function isDuplicateEmailError(message: string | undefined): boolean {
-      if (!message) return false
-      const lower = message.toLowerCase()
-      return (
-        lower.includes('already') ||
-        lower.includes('registered') ||
-        lower.includes('exists') ||
-        lower.includes('duplicate')
-      )
+    async function deleteUserByEmail(targetEmail: string) {
+      const { user, error: lookupError } = await findUserByEmail(targetEmail)
+      if (lookupError) return lookupError
+      if (!user) return null
+      const { error } = await adminClient.auth.admin.deleteUser(user.id)
+      return error?.message ?? null
     }
 
     let userId: string
 
     if (password.length > 0) {
-      const existing = await findUserByEmail(email)
+      const { user: existing } = await findUserByEmail(email)
+
       if (existing) {
         const { data, error } = await adminClient.auth.admin.updateUserById(existing.id, {
           password,
           email_confirm: true,
           user_metadata: {
-            ...(existing.user_metadata ?? {}),
+            ...asMetadataRecord(existing.user_metadata),
             ...(displayName ? { display_name: displayName } : {}),
             must_set_password: false,
           },
         })
 
         if (error || !data.user) {
-          return new Response(
-            JSON.stringify({ error: error?.message ?? 'Failed to update existing user' }),
-            {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            },
-          )
+          return jsonResponse({ error: error?.message ?? 'Failed to update existing user' }, 400)
         }
 
         userId = data.user.id
       } else {
-        const { data, error } = await adminClient.auth.admin.createUser({
+        let { data, error } = await adminClient.auth.admin.createUser({
           email,
           password,
           email_confirm: true,
           user_metadata: displayName ? { display_name: displayName } : undefined,
         })
 
-        if (error || !data.user) {
-          if (!isDuplicateEmailError(error?.message)) {
-            return new Response(JSON.stringify({ error: error?.message ?? 'Failed to create user' }), {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            })
-          }
-
-          const cleanupError = await removeExistingUser(email)
+        if ((error || !data.user) && isDuplicateEmailError(error?.message)) {
+          const cleanupError = await deleteUserByEmail(email)
           if (cleanupError) {
-            return new Response(JSON.stringify({ error: cleanupError }), {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            })
+            return jsonResponse({ error: cleanupError }, 400)
           }
 
-          const retry = await adminClient.auth.admin.createUser({
+          ;({ data, error } = await adminClient.auth.admin.createUser({
             email,
             password,
             email_confirm: true,
             user_metadata: displayName ? { display_name: displayName } : undefined,
-          })
-
-          if (retry.error || !retry.data.user) {
-            return new Response(
-              JSON.stringify({ error: retry.error?.message ?? error?.message ?? 'Failed to create user' }),
-              {
-                status: 400,
-                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-              },
-            )
-          }
-
-          userId = retry.data.user.id
-        } else {
-          userId = data.user.id
+          }))
         }
+
+        if (error || !data?.user) {
+          return jsonResponse({ error: error?.message ?? 'Failed to create user' }, 400)
+        }
+
+        userId = data.user.id
       }
     } else {
-      const cleanupError = await removeExistingUser(email)
-      if (cleanupError) {
-        return new Response(JSON.stringify({ error: cleanupError }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
-      }
-
-      const { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+      let { data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
         redirectTo: setPasswordUrl,
         data: {
           ...(displayName ? { display_name: displayName } : {}),
@@ -197,11 +166,23 @@ Deno.serve(async (req) => {
         },
       })
 
-      if (error || !data.user) {
-        return new Response(JSON.stringify({ error: error?.message ?? 'Failed to invite user' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        })
+      if ((error || !data.user) && isDuplicateEmailError(error?.message)) {
+        const cleanupError = await deleteUserByEmail(email)
+        if (cleanupError) {
+          return jsonResponse({ error: cleanupError }, 400)
+        }
+
+        ;({ data, error } = await adminClient.auth.admin.inviteUserByEmail(email, {
+          redirectTo: setPasswordUrl,
+          data: {
+            ...(displayName ? { display_name: displayName } : {}),
+            must_set_password: true,
+          },
+        }))
+      }
+
+      if (error || !data?.user) {
+        return jsonResponse({ error: error?.message ?? 'Failed to invite user' }, 400)
       }
 
       userId = data.user.id
@@ -216,35 +197,23 @@ Deno.serve(async (req) => {
       })
 
       if (memberError) {
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             error: memberError.message,
             user_id: userId,
             partial: true,
-          }),
-          {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           },
+          400,
         )
       }
     }
 
-    return new Response(
-      JSON.stringify({
-        user_id: userId,
-        invited: password.length === 0,
-      }),
-      {
-        status: 200,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      },
-    )
+    return jsonResponse({
+      user_id: userId,
+      invited: password.length === 0,
+    })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error'
-    return new Response(JSON.stringify({ error: message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return jsonResponse({ error: message }, 500)
   }
 })
