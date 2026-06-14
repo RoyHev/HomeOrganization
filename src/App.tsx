@@ -12,6 +12,7 @@ import { SupplyPage } from '@/features/supply/SupplyPage'
 import { AdminPage } from '@/features/admin/AdminPage'
 import { PlatformAdminPage } from '@/features/platform-admin/PlatformAdminPage'
 import { PlatformAdminProvider } from '@/hooks/usePlatformAdmin'
+import { RootRedirect } from '@/components/RootRedirect'
 
 export default function App() {
   return (
@@ -32,7 +33,7 @@ export default function App() {
               <Route path="/supply" element={<SupplyPage />} />
               <Route path="/admin" element={<AdminPage />} />
             </Route>
-            <Route path="*" element={<Navigate to="/pantry" replace />} />
+            <Route path="*" element={<RootRedirect />} />
           </Routes>
         </HouseholdProvider>
         </PlatformAdminProvider>

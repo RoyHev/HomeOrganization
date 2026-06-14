@@ -4,9 +4,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
 import type { L1Category, ShoppingListL1, ShoppingListItem } from '@/types/database'
 
-export type ShoppingListItemWithMeta = ShoppingListItem & {
-  categories: { id: string; name: string } | null
-}
+export type ShoppingListItemWithMeta = ShoppingListItem
 
 export function useShoppingList() {
   const { user } = useAuth()
@@ -24,7 +22,7 @@ export function useShoppingList() {
     setLoading(true)
     const { data, error } = await supabase
       .from('shopping_list_items')
-      .select('*, categories(id, name)')
+      .select('*')
       .eq('household_id', household.id)
       .order('l1')
       .order('name')
@@ -109,6 +107,23 @@ export function useShoppingList() {
     [fetchItems],
   )
 
+  const updateListQuantity = useCallback(
+    async (id: string, quantity: number) => {
+      if (quantity <= 0) {
+        return removeFromList(id)
+      }
+
+      const { error } = await supabase
+        .from('shopping_list_items')
+        .update({ quantity })
+        .eq('id', id)
+
+      if (!error) await fetchItems()
+      return { error: error?.message ?? null }
+    },
+    [fetchItems, removeFromList],
+  )
+
   const logActivity = useCallback(
     async (message: string) => {
       if (!household) return
@@ -178,6 +193,7 @@ export function useShoppingList() {
     loading,
     addToList,
     removeFromList,
+    updateListQuantity,
     completePurchase,
     refresh: fetchItems,
   }

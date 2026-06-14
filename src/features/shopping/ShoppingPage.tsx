@@ -1,14 +1,13 @@
 import { useMemo, useState } from 'react'
 import { Plus, ShoppingCart, Check } from 'lucide-react'
 import { useShoppingList, type ShoppingListItemWithMeta } from '@/hooks/useShoppingList'
-import { useCategories } from '@/hooks/useCategories'
 import type { ShoppingListL1 } from '@/types/database'
-import { formatQuantity } from '@/lib/utils'
 import { UNITS } from '@/lib/constants'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { EmptyState, LoadingSpinner } from '@/components/ui/empty-state'
+import { QuantityStepper } from '@/components/QuantityStepper'
 import {
   Select,
   SelectContent,
@@ -25,9 +24,7 @@ import {
 } from '@/components/ui/dialog'
 
 export function ShoppingPage() {
-  const { items, loading, addToList, completePurchase } = useShoppingList()
-  const { categories: pantryCategories } = useCategories('pantry')
-  const { categories: supplyCategories } = useCategories('supply')
+  const { items, loading, addToList, updateListQuantity, completePurchase } = useShoppingList()
 
   const [search, setSearch] = useState('')
   const [l1Filter, setL1Filter] = useState<string>('all')
@@ -125,24 +122,33 @@ export function ShoppingPage() {
       ) : (
         <div className="space-y-6">
           {grouped.pantry.length > 0 && (l1Filter === 'all' || l1Filter === 'pantry') && (
-            <ShoppingGroup title="Pantry" items={grouped.pantry} onCheck={handleItemCheck} />
+            <ShoppingGroup
+              title="Pantry"
+              items={grouped.pantry}
+              onCheck={handleItemCheck}
+              onUpdateQuantity={updateListQuantity}
+            />
           )}
           {grouped.supply.length > 0 && (l1Filter === 'all' || l1Filter === 'supply') && (
-            <ShoppingGroup title="Supply" items={grouped.supply} onCheck={handleItemCheck} />
+            <ShoppingGroup
+              title="Supply"
+              items={grouped.supply}
+              onCheck={handleItemCheck}
+              onUpdateQuantity={updateListQuantity}
+            />
           )}
           {grouped.general.length > 0 && (l1Filter === 'all' || l1Filter === 'general') && (
-            <ShoppingGroup title="Other" items={grouped.general} onCheck={handleItemCheck} />
+            <ShoppingGroup
+              title="Other"
+              items={grouped.general}
+              onCheck={handleItemCheck}
+              onUpdateQuantity={updateListQuantity}
+            />
           )}
         </div>
       )}
 
-      <AddItemDialog
-        open={showAddDialog}
-        onOpenChange={setShowAddDialog}
-        pantryCategories={pantryCategories}
-        supplyCategories={supplyCategories}
-        onAdd={addToList}
-      />
+      <AddItemDialog open={showAddDialog} onOpenChange={setShowAddDialog} onAdd={addToList} />
 
       <Dialog open={!!purchaseItem} onOpenChange={() => setPurchaseItem(null)}>
         <DialogContent className="max-w-sm">
@@ -195,10 +201,12 @@ function ShoppingGroup({
   title,
   items,
   onCheck,
+  onUpdateQuantity,
 }: {
   title: string
   items: ShoppingListItemWithMeta[]
   onCheck: (item: ShoppingListItemWithMeta) => void
+  onUpdateQuantity: (id: string, quantity: number) => Promise<{ error: string | null }>
 }) {
   return (
     <section>
@@ -207,18 +215,21 @@ function ShoppingGroup({
         {items.map((item) => (
           <li
             key={item.id}
-            className="flex items-center justify-between rounded-xl border bg-card p-4"
+            className="flex items-center gap-3 rounded-xl border bg-card p-4"
           >
             <div className="min-w-0 flex-1">
               <p className="font-medium">{item.name}</p>
-              <p className="text-sm text-muted-foreground">
-                {formatQuantity(Number(item.quantity), item.unit)}
-                {item.categories?.name && ` · ${item.categories.name}`}
-              </p>
             </div>
+            <QuantityStepper
+              value={Number(item.quantity)}
+              unit={item.unit}
+              onDecrement={() => void onUpdateQuantity(item.id, Number(item.quantity) - 1)}
+              onIncrement={() => void onUpdateQuantity(item.id, Number(item.quantity) + 1)}
+            />
             <Button
               variant="outline"
               size="icon"
+              className="shrink-0"
               onClick={() => onCheck(item)}
               title={item.l1 === 'general' ? 'Check off' : 'Mark as purchased'}
             >
@@ -234,14 +245,10 @@ function ShoppingGroup({
 function AddItemDialog({
   open,
   onOpenChange,
-  pantryCategories,
-  supplyCategories,
   onAdd,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  pantryCategories: Array<{ id: string; name: string }>
-  supplyCategories: Array<{ id: string; name: string }>
   onAdd: (item: {
     name: string
     quantity: number
@@ -254,9 +261,7 @@ function AddItemDialog({
   const [quantity, setQuantity] = useState('1')
   const [unit, setUnit] = useState('each')
   const [l1, setL1] = useState<ShoppingListL1>('pantry')
-  const [categoryId, setCategoryId] = useState('none')
 
-  const categories = l1 === 'pantry' ? pantryCategories : supplyCategories
   const isGeneral = l1 === 'general'
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -266,7 +271,7 @@ function AddItemDialog({
       quantity: parseFloat(quantity) || 1,
       unit,
       l1,
-      category_id: isGeneral || categoryId === 'none' ? null : categoryId,
+      category_id: null,
     })
     setName('')
     setQuantity('1')
@@ -286,13 +291,7 @@ function AddItemDialog({
           </div>
           <div className="space-y-2">
             <Label>Type</Label>
-            <Select
-              value={l1}
-              onValueChange={(v) => {
-                setL1(v as ShoppingListL1)
-                setCategoryId('none')
-              }}
-            >
+            <Select value={l1} onValueChange={(v) => setL1(v as ShoppingListL1)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -335,24 +334,6 @@ function AddItemDialog({
               </Select>
             </div>
           </div>
-          {!isGeneral && (
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <Select value={categoryId} onValueChange={setCategoryId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
           <Button type="submit" className="w-full">
             Add to list
           </Button>

@@ -18,7 +18,7 @@ export function useInventory(l1: L1Category) {
     setLoading(true)
     const { data, error } = await supabase
       .from('inventory_items')
-      .select('*, categories(id, name)')
+      .select('*')
       .eq('household_id', household.id)
       .eq('l1', l1)
       .order('name')

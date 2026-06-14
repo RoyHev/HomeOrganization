@@ -186,6 +186,13 @@ Deno.serve(async (req) => {
       }
 
       userId = data.user.id
+
+      await adminClient.auth.admin.updateUserById(userId, {
+        user_metadata: {
+          must_set_password: true,
+          ...(displayName ? { display_name: displayName } : {}),
+        },
+      })
     }
 
     if (householdId) {

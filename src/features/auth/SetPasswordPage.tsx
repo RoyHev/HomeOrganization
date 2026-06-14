@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { Home } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { getAuthLinkType } from '@/lib/auth-utils'
+import { getPendingPasswordSetup } from '@/lib/auth-utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,24 +16,17 @@ export function SetPasswordPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
-  const [ready, setReady] = useState(false)
 
-  const linkType = getAuthLinkType()
-  const isInvite = linkType === 'invite' || needsPasswordSetup
-
-  useEffect(() => {
-    if (linkType === 'invite' || linkType === 'recovery' || needsPasswordSetup) {
-      setReady(true)
-    }
-  }, [linkType, needsPasswordSetup])
+  const pendingType = getPendingPasswordSetup()
+  const isInvite = pendingType === 'invite' || needsPasswordSetup
 
   if (loading) return <LoadingSpinner className="min-h-dvh" />
 
   if (!user) return <Navigate to="/login" replace />
 
-  if (!ready && !needsPasswordSetup) return <Navigate to="/" replace />
+  if (!needsPasswordSetup && !pendingType) return <Navigate to="/pantry" replace />
 
-  if (done) return <Navigate to="/" replace />
+  if (done) return <Navigate to="/pantry" replace />
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

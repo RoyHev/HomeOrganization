@@ -44,5 +44,4 @@ export type SortOption =
   | 'name-desc'
   | 'quantity-asc'
   | 'quantity-desc'
-  | 'category'
   | 'updated'

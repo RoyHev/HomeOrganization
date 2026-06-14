@@ -1,17 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, AlertTriangle } from 'lucide-react'
 import { useInventory } from '@/hooks/useInventory'
-import { useCategories } from '@/hooks/useCategories'
 import { useShoppingList } from '@/hooks/useShoppingList'
 import type { InventoryItemWithCategory, L1Category } from '@/types/database'
 import type { SortOption } from '@/lib/constants'
-import { isLowStock, isOutOfStock, formatQuantity } from '@/lib/utils'
+import { isLowStock, isOutOfStock } from '@/lib/utils'
 import { UNITS } from '@/lib/constants'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState, LoadingSpinner } from '@/components/ui/empty-state'
+import { QuantityStepper } from '@/components/QuantityStepper'
 import {
   Select,
   SelectContent,
@@ -36,15 +36,19 @@ interface InventoryPageProps {
 
 export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProps) {
   const { items, loading, addItem, updateItem, deleteItem } = useInventory(l1)
-  const { categories } = useCategories(l1)
   const { addToList } = useShoppingList()
 
   const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [sort, setSort] = useState<SortOption>('name-asc')
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [editingItem, setEditingItem] = useState<InventoryItemWithCategory | null>(null)
   const [lowStockPrompt, setLowStockPrompt] = useState<InventoryItemWithCategory | null>(null)
+  const [lowStockAddQty, setLowStockAddQty] = useState(1)
+
+  useEffect(() => {
+    if (!lowStockPrompt) return
+    setLowStockAddQty(Math.max(1, Number(lowStockPrompt.low_stock_threshold ?? 1)))
+  }, [lowStockPrompt])
 
   const filteredItems = useMemo(() => {
     let result = [...items]
@@ -52,10 +56,6 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
     if (search.trim()) {
       const q = search.toLowerCase()
       result = result.filter((i) => i.name.toLowerCase().includes(q))
-    }
-
-    if (categoryFilter !== 'all') {
-      result = result.filter((i) => i.category_id === categoryFilter)
     }
 
     switch (sort) {
@@ -71,11 +71,6 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
       case 'quantity-desc':
         result.sort((a, b) => Number(b.quantity) - Number(a.quantity))
         break
-      case 'category':
-        result.sort((a, b) =>
-          (a.categories?.name ?? 'zzz').localeCompare(b.categories?.name ?? 'zzz'),
-        )
-        break
       case 'updated':
         result.sort(
           (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
@@ -84,7 +79,7 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
     }
 
     return result
-  }, [items, search, categoryFilter, sort])
+  }, [items, search, sort])
 
   const lowStockItems = useMemo(() => {
     const now = new Date()
@@ -97,15 +92,16 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
   const handleLowStockAction = async (
     item: InventoryItemWithCategory,
     action: 'add' | 'snooze' | 'dismiss',
+    quantity?: number,
   ) => {
     if (action === 'add') {
       await addToList({
         name: item.name,
-        quantity: Math.max(1, Number(item.low_stock_threshold ?? 1)),
+        quantity: Math.max(1, quantity ?? 1),
         unit: item.unit,
         l1: item.l1,
         inventory_item_id: item.id,
-        category_id: item.category_id,
+        category_id: null,
       })
     } else if (action === 'snooze') {
       const snoozeUntil = new Date()
@@ -160,34 +156,18 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
             className="pl-9"
           />
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All categories</SelectItem>
-              {categories.map((c) => (
-                <SelectItem key={c.id} value={c.id}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
-            <SelectTrigger>
-              <SelectValue placeholder="Sort" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="name-asc">Name A–Z</SelectItem>
-              <SelectItem value="name-desc">Name Z–A</SelectItem>
-              <SelectItem value="quantity-asc">Quantity ↑</SelectItem>
-              <SelectItem value="quantity-desc">Quantity ↓</SelectItem>
-              <SelectItem value="category">Category</SelectItem>
-              <SelectItem value="updated">Recently updated</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+        <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+          <SelectTrigger>
+            <SelectValue placeholder="Sort" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name-asc">Name A–Z</SelectItem>
+            <SelectItem value="name-desc">Name Z–A</SelectItem>
+            <SelectItem value="quantity-asc">Quantity ↑</SelectItem>
+            <SelectItem value="quantity-desc">Quantity ↓</SelectItem>
+            <SelectItem value="updated">Recently updated</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {filteredItems.length === 0 ? (
@@ -219,11 +199,20 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
                     {outOfStock && <Badge variant="destructive">Out</Badge>}
                     {!outOfStock && low && <Badge variant="warning">Low</Badge>}
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {item.categories?.name ?? 'Uncategorized'} ·{' '}
-                    {formatQuantity(Number(item.quantity), item.unit)}
-                  </p>
                 </div>
+            <QuantityStepper
+              value={Number(item.quantity)}
+              unit={item.unit}
+              min={0}
+                  onDecrement={() =>
+                    void updateItem(item.id, {
+                      quantity: Math.max(0, Number(item.quantity) - 1),
+                    })
+                  }
+                  onIncrement={() =>
+                    void updateItem(item.id, { quantity: Number(item.quantity) + 1 })
+                  }
+                />
               </li>
             )
           })}
@@ -239,13 +228,12 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
           }
         }}
         l1={l1}
-        categories={categories}
         item={editingItem}
         onSave={async (data) => {
           if (editingItem) {
-            await updateItem(editingItem.id, data)
+            await updateItem(editingItem.id, { ...data, category_id: null })
           } else {
-            await addItem(data)
+            await addItem({ ...data, category_id: null })
           }
           setShowAddDialog(false)
           setEditingItem(null)
@@ -269,19 +257,36 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
               {isOutOfStock(Number(lowStockPrompt?.quantity ?? 0)) ? 'out of stock' : 'running low'}.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-2">
-            <Button onClick={() => lowStockPrompt && void handleLowStockAction(lowStockPrompt, 'add')}>
-              Yes, add to list
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => lowStockPrompt && void handleLowStockAction(lowStockPrompt, 'snooze')}
-            >
-              Snooze 3 days
-            </Button>
-            <Button variant="ghost" onClick={() => setLowStockPrompt(null)}>
-              Not now
-            </Button>
+          <div className="space-y-4">
+            <div className="flex flex-col items-center gap-2">
+              <Label>How many to add?</Label>
+              <QuantityStepper
+                value={lowStockAddQty}
+                unit={lowStockPrompt?.unit}
+                min={1}
+                onDecrement={() => setLowStockAddQty((q) => Math.max(1, q - 1))}
+                onIncrement={() => setLowStockAddQty((q) => q + 1)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Button
+                onClick={() =>
+                  lowStockPrompt &&
+                  void handleLowStockAction(lowStockPrompt, 'add', lowStockAddQty)
+                }
+              >
+                Add to shopping list
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => lowStockPrompt && void handleLowStockAction(lowStockPrompt, 'snooze')}
+              >
+                Snooze 3 days
+              </Button>
+              <Button variant="ghost" onClick={() => setLowStockPrompt(null)}>
+                Not now
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -293,13 +298,11 @@ interface ItemFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   l1: L1Category
-  categories: Array<{ id: string; name: string }>
   item: InventoryItemWithCategory | null
   onSave: (data: {
     name: string
     quantity: number
     unit: string
-    category_id: string | null
     low_stock_threshold: number | null
     notes?: string
   }) => Promise<void>
@@ -309,7 +312,6 @@ interface ItemFormDialogProps {
 function ItemFormDialog({
   open,
   onOpenChange,
-  categories,
   item,
   onSave,
   onDelete,
@@ -317,7 +319,6 @@ function ItemFormDialog({
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('1')
   const [unit, setUnit] = useState('each')
-  const [categoryId, setCategoryId] = useState<string>('none')
   const [threshold, setThreshold] = useState('')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -328,14 +329,12 @@ function ItemFormDialog({
       setName(item.name)
       setQuantity(String(item.quantity))
       setUnit(item.unit)
-      setCategoryId(item.category_id ?? 'none')
       setThreshold(item.low_stock_threshold != null ? String(item.low_stock_threshold) : '')
       setNotes(item.notes ?? '')
     } else {
       setName('')
       setQuantity('1')
       setUnit('each')
-      setCategoryId('none')
       setThreshold('1')
       setNotes('')
     }
@@ -348,7 +347,6 @@ function ItemFormDialog({
       name: name.trim(),
       quantity: parseFloat(quantity) || 0,
       unit,
-      category_id: categoryId === 'none' ? null : categoryId,
       low_stock_threshold: threshold ? parseFloat(threshold) : null,
       notes: notes || undefined,
     })
@@ -393,22 +391,6 @@ function ItemFormDialog({
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          <div className="space-y-2">
-            <Label>Category</Label>
-            <Select value={categoryId} onValueChange={setCategoryId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Uncategorized</SelectItem>
-                {categories.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
           <div className="space-y-2">
             <Label>Low stock threshold</Label>

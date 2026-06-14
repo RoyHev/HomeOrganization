@@ -58,7 +58,7 @@ export function RecipesPage() {
           unit: ing.unit,
           l1: 'pantry',
           inventory_item_id: pantryItem?.id ?? null,
-          category_id: pantryItem?.category_id ?? null,
+          category_id: null,
         })
       }
     }

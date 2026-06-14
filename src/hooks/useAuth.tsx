@@ -9,7 +9,7 @@ import {
 } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { getAuthLinkType, userNeedsPasswordSetup } from '@/lib/auth-utils'
+import { userNeedsPasswordSetup, captureAuthLinkType, clearPendingPasswordSetup, getPendingPasswordSetup } from '@/lib/auth-utils'
 
 export interface AuthErrorResult {
   message: string
@@ -31,8 +31,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 function initialPasswordSetupRequired(): boolean {
-  const linkType = getAuthLinkType()
-  return linkType === 'invite' || linkType === 'recovery'
+  return getPendingPasswordSetup() !== null
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -42,11 +41,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [needsPasswordSetup, setNeedsPasswordSetup] = useState(initialPasswordSetupRequired)
 
   const syncPasswordSetup = useCallback((nextUser: User | null) => {
-    const linkType = getAuthLinkType()
-    if (linkType === 'invite' || linkType === 'recovery') {
-      setNeedsPasswordSetup(true)
-      return
-    }
+    captureAuthLinkType()
     setNeedsPasswordSetup(userNeedsPasswordSetup(nextUser))
   }, [])
 
@@ -61,11 +56,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, s) => {
+      captureAuthLinkType()
       setSession(s)
       setUser(s?.user ?? null)
       setLoading(false)
 
       if (event === 'PASSWORD_RECOVERY') {
+        sessionStorage.setItem('auth:pending-password-setup', 'recovery')
         setNeedsPasswordSetup(true)
         return
       }
@@ -75,10 +72,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
+      if (event === 'INITIAL_SESSION' && s?.user) {
+        syncPasswordSetup(s.user)
+        return
+      }
+
       if (event === 'USER_UPDATED' && s?.user) {
-        if (!userNeedsPasswordSetup(s.user)) {
-          setNeedsPasswordSetup(false)
-        }
+        setNeedsPasswordSetup(userNeedsPasswordSetup(s.user))
       }
     })
 
@@ -118,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data: { must_set_password: false },
     })
     if (!error) {
+      clearPendingPasswordSetup()
       setNeedsPasswordSetup(false)
       return null
     }

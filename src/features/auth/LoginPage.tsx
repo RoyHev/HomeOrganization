@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { Home } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
-import { getAuthLinkType } from '@/lib/auth-utils'
+import { captureAuthLinkType, getAuthLinkType, getPendingPasswordSetup } from '@/lib/auth-utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,7 +41,8 @@ export function LoginPage() {
   const projectRef = getSupabaseProjectRef()
 
   useEffect(() => {
-    const type = getAuthLinkType()
+    captureAuthLinkType()
+    const type = getAuthLinkType() ?? getPendingPasswordSetup()
     if (type === 'invite' || type === 'recovery') {
       navigate(`/set-password${window.location.search}${window.location.hash}`, { replace: true })
     }
