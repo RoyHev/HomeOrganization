@@ -9,7 +9,7 @@ alter table public.platform_admins enable row level security;
 
 -- Replace with your login email if different
 insert into public.platform_admins (email)
-values ('roy@themarketbeyond.com')
+values ('roy.hevrony@gmail.com')
 on conflict (email) do nothing;
 
 create or replace function public.is_platform_admin()
