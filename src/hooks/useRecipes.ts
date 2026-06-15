@@ -1,24 +1,25 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useHousehold } from '@/hooks/useHousehold'
-import type { RecipeWithDetails } from '@/types/database'
+import type { RecipeImage, RecipeL1Category, RecipeWithDetails } from '@/types/database'
+import { hasRecipeMacros } from '@/types/database'
 
 export function useRecipes() {
   const { household } = useHousehold()
   const [recipes, setRecipes] = useState<RecipeWithDetails[]>([])
   const [loading, setLoading] = useState(true)
 
-  const fetchRecipes = useCallback(async () => {
+  const fetchRecipes = useCallback(async (opts?: { silent?: boolean }) => {
     if (!household) {
       setRecipes([])
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
       return
     }
 
-    setLoading(true)
+    if (!opts?.silent) setLoading(true)
     const { data, error } = await supabase
       .from('recipes')
-      .select('*, recipe_ingredients(*), recipe_macros(*)')
+      .select('*, recipe_ingredients(*), recipe_macros(*), recipe_images(*)')
       .eq('household_id', household.id)
       .order('title')
 
@@ -30,10 +31,11 @@ export function useRecipes() {
             (a, b) => a.sort_order - b.sort_order,
           ),
           recipe_macros: Array.isArray(r.recipe_macros) ? r.recipe_macros[0] ?? null : r.recipe_macros,
+          recipe_images: (r.recipe_images ?? []).sort((a, b) => a.sort_order - b.sort_order),
         })) as RecipeWithDetails[],
       )
     }
-    setLoading(false)
+    if (!opts?.silent) setLoading(false)
   }, [household])
 
   useEffect(() => {
@@ -54,7 +56,7 @@ export function useRecipes() {
           filter: `household_id=eq.${household.id}`,
         },
         () => {
-          void fetchRecipes()
+          void fetchRecipes({ silent: true })
         },
       )
       .subscribe()
@@ -64,6 +66,25 @@ export function useRecipes() {
     }
   }, [household, fetchRecipes])
 
+  const uploadRecipeImage = useCallback(
+    async (file: File) => {
+      if (!household) return { error: 'No household', url: null }
+
+      const ext = file.name.split('.').pop() ?? 'jpg'
+      const path = `${household.id}/${Date.now()}.${ext}`
+
+      const { error } = await supabase.storage.from('recipe-images').upload(path, file, {
+        upsert: false,
+      })
+
+      if (error) return { error: error.message, url: null }
+
+      const { data } = supabase.storage.from('recipe-images').getPublicUrl(path)
+      return { error: null, url: data.publicUrl }
+    },
+    [household],
+  )
+
   const saveRecipe = useCallback(
     async (recipe: {
       id?: string
@@ -72,6 +93,9 @@ export function useRecipes() {
       instructions: string
       prep_minutes: number | null
       cook_minutes: number | null
+      l1: RecipeL1Category | null
+      recipe_type: string | null
+      source_url: string | null
       ingredients: Array<{
         name: string
         quantity: number
@@ -84,37 +108,37 @@ export function useRecipes() {
         carbs_g: number | null
         fat_g: number | null
       }
+      images: Array<{ url: string; is_primary: boolean }>
     }) => {
       if (!household) return { error: 'No household', id: null }
 
       let recipeId = recipe.id
 
+      const recipePayload = {
+        title: recipe.title,
+        servings: recipe.servings,
+        instructions: recipe.instructions,
+        prep_minutes: recipe.prep_minutes,
+        cook_minutes: recipe.cook_minutes,
+        l1: recipe.l1,
+        recipe_type: recipe.recipe_type,
+        source_url: recipe.source_url,
+      }
+
       if (recipeId) {
         const { error } = await supabase
           .from('recipes')
-          .update({
-            title: recipe.title,
-            servings: recipe.servings,
-            instructions: recipe.instructions,
-            prep_minutes: recipe.prep_minutes,
-            cook_minutes: recipe.cook_minutes,
-          })
+          .update(recipePayload)
           .eq('id', recipeId)
 
         if (error) return { error: error.message, id: null }
 
         await supabase.from('recipe_ingredients').delete().eq('recipe_id', recipeId)
+        await supabase.from('recipe_images').delete().eq('recipe_id', recipeId)
       } else {
         const { data, error } = await supabase
           .from('recipes')
-          .insert({
-            household_id: household.id,
-            title: recipe.title,
-            servings: recipe.servings,
-            instructions: recipe.instructions,
-            prep_minutes: recipe.prep_minutes,
-            cook_minutes: recipe.cook_minutes,
-          })
+          .insert({ household_id: household.id, ...recipePayload })
           .select()
           .single()
 
@@ -135,12 +159,28 @@ export function useRecipes() {
         )
       }
 
-      await supabase.from('recipe_macros').upsert({
-        recipe_id: recipeId!,
-        ...recipe.macros,
-      })
+      if (hasRecipeMacros(recipe.macros)) {
+        await supabase.from('recipe_macros').upsert({
+          recipe_id: recipeId!,
+          ...recipe.macros,
+        })
+      } else if (recipeId) {
+        await supabase.from('recipe_macros').delete().eq('recipe_id', recipeId)
+      }
 
-      await fetchRecipes()
+      if (recipe.images.length > 0) {
+        const hasPrimary = recipe.images.some((img) => img.is_primary)
+        await supabase.from('recipe_images').insert(
+          recipe.images.map((img, i) => ({
+            recipe_id: recipeId!,
+            url: img.url,
+            is_primary: hasPrimary ? img.is_primary : i === 0,
+            sort_order: i,
+          })),
+        )
+      }
+
+      await fetchRecipes({ silent: true })
       return { error: null, id: recipeId }
     },
     [household, fetchRecipes],
@@ -149,11 +189,13 @@ export function useRecipes() {
   const deleteRecipe = useCallback(
     async (id: string) => {
       const { error } = await supabase.from('recipes').delete().eq('id', id)
-      if (!error) await fetchRecipes()
+      if (!error) await fetchRecipes({ silent: true })
       return { error: error?.message ?? null }
     },
     [fetchRecipes],
   )
 
-  return { recipes, loading, saveRecipe, deleteRecipe, refresh: fetchRecipes }
+  return { recipes, loading, saveRecipe, deleteRecipe, uploadRecipeImage, refresh: fetchRecipes }
 }
+
+export type { RecipeImage }

@@ -39,6 +39,14 @@ export const DEFAULT_SUPPLY_CATEGORIES = [
 
 export type L1Category = 'pantry' | 'supply'
 
+export const RECIPE_L1_CATEGORIES = [
+  { value: 'starters', label: 'Starters' },
+  { value: 'entrees', label: 'Entrees' },
+  { value: 'desserts', label: 'Desserts' },
+] as const
+
+export type RecipeL1Category = (typeof RECIPE_L1_CATEGORIES)[number]['value']
+
 export type SortOption =
   | 'name-asc'
   | 'name-desc'

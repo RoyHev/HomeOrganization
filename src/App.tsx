@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider } from '@/hooks/useAuth'
 import { HouseholdProvider } from '@/hooks/useHousehold'
+import { ToastProvider } from '@/hooks/useToast'
 import { AppShell } from '@/components/layout/AppShell'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { SetPasswordPage } from '@/features/auth/SetPasswordPage'
@@ -20,6 +21,7 @@ export default function App() {
       <AuthProvider>
         <PlatformAdminProvider>
           <HouseholdProvider>
+            <ToastProvider>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
               <Route path="/set-password" element={<SetPasswordPage />} />
@@ -35,6 +37,7 @@ export default function App() {
             </Route>
             <Route path="*" element={<RootRedirect />} />
           </Routes>
+            </ToastProvider>
         </HouseholdProvider>
         </PlatformAdminProvider>
       </AuthProvider>

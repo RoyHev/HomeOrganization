@@ -12,14 +12,14 @@ export function useShoppingList() {
   const [items, setItems] = useState<ShoppingListItemWithMeta[]>([])
   const [loading, setLoading] = useState(true)
 
-  const fetchItems = useCallback(async () => {
+  const fetchItems = useCallback(async (opts?: { silent?: boolean }) => {
     if (!household) {
       setItems([])
-      setLoading(false)
+      if (!opts?.silent) setLoading(false)
       return
     }
 
-    setLoading(true)
+    if (!opts?.silent) setLoading(true)
     const { data, error } = await supabase
       .from('shopping_list_items')
       .select('*')
@@ -28,7 +28,7 @@ export function useShoppingList() {
       .order('name')
 
     if (!error && data) setItems(data as ShoppingListItemWithMeta[])
-    setLoading(false)
+    if (!opts?.silent) setLoading(false)
   }, [household])
 
   useEffect(() => {
@@ -49,7 +49,7 @@ export function useShoppingList() {
           filter: `household_id=eq.${household.id}`,
         },
         () => {
-          void fetchItems()
+          void fetchItems({ silent: true })
         },
       )
       .subscribe()
@@ -59,50 +59,140 @@ export function useShoppingList() {
     }
   }, [household, fetchItems])
 
-  const addToList = useCallback(
-    async (item: {
+  const findDuplicate = useCallback(
+    (item: {
       name: string
-      quantity: number
-      unit: string
       l1: ShoppingListL1
       inventory_item_id?: string | null
-      category_id?: string | null
-    }) => {
-      if (!household) return { error: 'No household' }
-
-      const existing = items.find(
+    }) =>
+      items.find(
         (i) =>
           i.name.toLowerCase() === item.name.toLowerCase() &&
           i.l1 === item.l1 &&
           (item.inventory_item_id ? i.inventory_item_id === item.inventory_item_id : true),
-      )
+      ),
+    [items],
+  )
 
-      if (existing) {
-        const { error } = await supabase
-          .from('shopping_list_items')
-          .update({ quantity: Number(existing.quantity) + item.quantity })
-          .eq('id', existing.id)
-        if (!error) await fetchItems()
-        return { error: error?.message ?? null }
+  const addToList = useCallback(
+    async (
+      item: {
+        name: string
+        quantity: number
+        unit: string
+        l1: ShoppingListL1
+        inventory_item_id?: string | null
+        category_id?: string | null
+      },
+      opts?: { mergeIfDuplicate?: boolean },
+    ) => {
+      if (!household) return { error: 'No household' as const, duplicate: undefined }
+
+      const existing = findDuplicate(item)
+      const shouldMerge = opts?.mergeIfDuplicate !== false
+
+      if (existing && !shouldMerge) {
+        return { error: null, duplicate: existing }
       }
 
-      const { error } = await supabase.from('shopping_list_items').insert({
+      if (existing) {
+        const newQty = Number(existing.quantity) + item.quantity
+        setItems((prev) =>
+          prev.map((i) => (i.id === existing.id ? { ...i, quantity: newQty } : i)),
+        )
+        const { error } = await supabase
+          .from('shopping_list_items')
+          .update({ quantity: newQty })
+          .eq('id', existing.id)
+        if (error) {
+          void fetchItems({ silent: true })
+          return { error: error.message, duplicate: undefined }
+        }
+        return { error: null, duplicate: undefined }
+      }
+
+      const optimistic: ShoppingListItemWithMeta = {
+        id: `temp-${Date.now()}`,
         household_id: household.id,
         added_by: user?.id ?? null,
+        created_at: new Date().toISOString(),
+        category_id: item.category_id ?? null,
+        inventory_item_id: item.inventory_item_id ?? null,
         ...item,
-      })
+      }
+      setItems((prev) => [...prev, optimistic])
 
-      if (!error) await fetchItems()
-      return { error: error?.message ?? null }
+      const { data, error } = await supabase
+        .from('shopping_list_items')
+        .insert({
+          household_id: household.id,
+          added_by: user?.id ?? null,
+          ...item,
+        })
+        .select()
+        .single()
+
+      if (error) {
+        void fetchItems({ silent: true })
+        return { error: error.message, duplicate: undefined }
+      }
+
+      if (data) {
+        setItems((prev) => prev.map((i) => (i.id === optimistic.id ? (data as ShoppingListItemWithMeta) : i)))
+      }
+      return { error: null, duplicate: undefined }
     },
-    [household, user, items, fetchItems],
+    [household, user, findDuplicate, fetchItems],
+  )
+
+  const updateExistingItem = useCallback(
+    async (
+      id: string,
+      updates: { quantity?: number; unit?: string },
+      mode: 'add' | 'replace',
+    ) => {
+      const existing = items.find((i) => i.id === id)
+      if (!existing) return { error: 'Item not found' }
+
+      const quantity =
+        mode === 'add'
+          ? Number(existing.quantity) + (updates.quantity ?? 0)
+          : (updates.quantity ?? Number(existing.quantity))
+
+      setItems((prev) =>
+        prev.map((i) =>
+          i.id === id
+            ? { ...i, quantity, ...(updates.unit ? { unit: updates.unit } : {}) }
+            : i,
+        ),
+      )
+
+      const { error } = await supabase
+        .from('shopping_list_items')
+        .update({
+          quantity,
+          ...(updates.unit ? { unit: updates.unit } : {}),
+        })
+        .eq('id', id)
+
+      if (error) {
+        void fetchItems({ silent: true })
+        return { error: error.message }
+      }
+      return { error: null }
+    },
+    [items, fetchItems],
   )
 
   const removeFromList = useCallback(
     async (id: string) => {
+      setItems((prev) => prev.filter((i) => i.id !== id))
       const { error } = await supabase.from('shopping_list_items').delete().eq('id', id)
-      if (!error) await fetchItems()
-      return { error: error?.message ?? null }
+      if (error) {
+        void fetchItems({ silent: true })
+        return { error: error.message }
+      }
+      return { error: null }
     },
     [fetchItems],
   )
@@ -113,13 +203,18 @@ export function useShoppingList() {
         return removeFromList(id)
       }
 
+      setItems((prev) => prev.map((i) => (i.id === id ? { ...i, quantity } : i)))
+
       const { error } = await supabase
         .from('shopping_list_items')
         .update({ quantity })
         .eq('id', id)
 
-      if (!error) await fetchItems()
-      return { error: error?.message ?? null }
+      if (error) {
+        void fetchItems({ silent: true })
+        return { error: error.message }
+      }
+      return { error: null }
     },
     [fetchItems, removeFromList],
   )
@@ -172,6 +267,7 @@ export function useShoppingList() {
         }
       }
 
+      setItems((prev) => prev.filter((i) => i.id !== listItem.id))
       await supabase.from('shopping_list_items').delete().eq('id', listItem.id)
 
       const displayName =
@@ -182,16 +278,17 @@ export function useShoppingList() {
           : `${displayName} bought ${purchasedQuantity} ${listItem.unit} of ${listItem.name}`,
       )
 
-      await fetchItems()
       return { error: null }
     },
-    [household, user, fetchItems, logActivity],
+    [household, user, logActivity],
   )
 
   return {
     items,
     loading,
     addToList,
+    updateExistingItem,
+    findDuplicate,
     removeFromList,
     updateListQuantity,
     completePurchase,

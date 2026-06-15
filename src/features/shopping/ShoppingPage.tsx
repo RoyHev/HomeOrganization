@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
 import { Plus, ShoppingCart, Check } from 'lucide-react'
 import { useShoppingList, type ShoppingListItemWithMeta } from '@/hooks/useShoppingList'
-import type { ShoppingListL1 } from '@/types/database'
+import { useToast } from '@/hooks/useToast'
+import type { ShoppingListL1, ShoppingListItem } from '@/types/database'
 import { UNITS } from '@/lib/constants'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { EmptyState, LoadingSpinner } from '@/components/ui/empty-state'
 import { QuantityStepper } from '@/components/QuantityStepper'
+import { DuplicateItemDialog } from '@/components/DuplicateItemDialog'
 import {
   Select,
   SelectContent,
@@ -24,7 +26,9 @@ import {
 } from '@/components/ui/dialog'
 
 export function ShoppingPage() {
-  const { items, loading, addToList, updateListQuantity, completePurchase } = useShoppingList()
+  const { items, loading, addToList, updateExistingItem, updateListQuantity, completePurchase } =
+    useShoppingList()
+  const { showToast } = useToast()
 
   const [search, setSearch] = useState('')
   const [l1Filter, setL1Filter] = useState<string>('all')
@@ -52,9 +56,16 @@ export function ShoppingPage() {
     return { pantry, supply, general }
   }, [filteredItems])
 
+  const handleQuantityChange = async (id: string, quantity: number) => {
+    const { error } = await updateListQuantity(id, quantity)
+    if (error) showToast(`Failed to update quantity: ${error}`)
+  }
+
   const handleItemCheck = (item: ShoppingListItemWithMeta) => {
     if (item.l1 === 'general') {
-      void completePurchase(item, 0, false)
+      void completePurchase(item, 0, false).then(({ error }) => {
+        if (error) showToast(`Failed to check off item: ${error}`)
+      })
       return
     }
     openPurchase(item)
@@ -68,11 +79,12 @@ export function ShoppingPage() {
 
   const handlePurchase = async () => {
     if (!purchaseItem) return
-    await completePurchase(
+    const { error } = await completePurchase(
       purchaseItem,
       parseFloat(purchasedQty) || 0,
       createInventory && !purchaseItem.inventory_item_id,
     )
+    if (error) showToast(`Failed to complete purchase: ${error}`)
     setPurchaseItem(null)
   }
 
@@ -126,7 +138,7 @@ export function ShoppingPage() {
               title="Pantry"
               items={grouped.pantry}
               onCheck={handleItemCheck}
-              onUpdateQuantity={updateListQuantity}
+              onUpdateQuantity={handleQuantityChange}
             />
           )}
           {grouped.supply.length > 0 && (l1Filter === 'all' || l1Filter === 'supply') && (
@@ -134,7 +146,7 @@ export function ShoppingPage() {
               title="Supply"
               items={grouped.supply}
               onCheck={handleItemCheck}
-              onUpdateQuantity={updateListQuantity}
+              onUpdateQuantity={handleQuantityChange}
             />
           )}
           {grouped.general.length > 0 && (l1Filter === 'all' || l1Filter === 'general') && (
@@ -142,13 +154,19 @@ export function ShoppingPage() {
               title="Other"
               items={grouped.general}
               onCheck={handleItemCheck}
-              onUpdateQuantity={updateListQuantity}
+              onUpdateQuantity={handleQuantityChange}
             />
           )}
         </div>
       )}
 
-      <AddItemDialog open={showAddDialog} onOpenChange={setShowAddDialog} onAdd={addToList} />
+      <AddItemDialog
+        open={showAddDialog}
+        onOpenChange={setShowAddDialog}
+        onAdd={addToList}
+        onUpdateExisting={updateExistingItem}
+        onError={showToast}
+      />
 
       <Dialog open={!!purchaseItem} onOpenChange={() => setPurchaseItem(null)}>
         <DialogContent className="max-w-sm">
@@ -206,7 +224,7 @@ function ShoppingGroup({
   title: string
   items: ShoppingListItemWithMeta[]
   onCheck: (item: ShoppingListItemWithMeta) => void
-  onUpdateQuantity: (id: string, quantity: number) => Promise<{ error: string | null }>
+  onUpdateQuantity: (id: string, quantity: number) => void
 }) {
   return (
     <section>
@@ -223,8 +241,8 @@ function ShoppingGroup({
             <QuantityStepper
               value={Number(item.quantity)}
               unit={item.unit}
-              onDecrement={() => void onUpdateQuantity(item.id, Number(item.quantity) - 1)}
-              onIncrement={() => void onUpdateQuantity(item.id, Number(item.quantity) + 1)}
+              onDecrement={() => onUpdateQuantity(item.id, Number(item.quantity) - 1)}
+              onIncrement={() => onUpdateQuantity(item.id, Number(item.quantity) + 1)}
             />
             <Button
               variant="outline"
@@ -246,99 +264,163 @@ function AddItemDialog({
   open,
   onOpenChange,
   onAdd,
+  onUpdateExisting,
+  onError,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onAdd: (item: {
-    name: string
-    quantity: number
-    unit: string
-    l1: ShoppingListL1
-    category_id?: string | null
-  }) => Promise<{ error: string | null }>
+  onAdd: (
+    item: {
+      name: string
+      quantity: number
+      unit: string
+      l1: ShoppingListL1
+      category_id?: string | null
+    },
+    opts?: { mergeIfDuplicate?: boolean },
+  ) => Promise<{ error: string | null; duplicate?: ShoppingListItem }>
+  onUpdateExisting: (
+    id: string,
+    updates: { quantity?: number; unit?: string },
+    mode: 'add' | 'replace',
+  ) => Promise<{ error: string | null }>
+  onError: (message: string) => void
 }) {
   const [name, setName] = useState('')
   const [quantity, setQuantity] = useState('1')
   const [unit, setUnit] = useState('each')
   const [l1, setL1] = useState<ShoppingListL1>('pantry')
+  const [duplicate, setDuplicate] = useState<ShoppingListItem | null>(null)
 
   const isGeneral = l1 === 'general'
+  const parsedQty = parseFloat(quantity) || 1
+
+  const resetForm = () => {
+    setName('')
+    setQuantity('1')
+    setDuplicate(null)
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    await onAdd({
-      name: name.trim(),
-      quantity: parseFloat(quantity) || 1,
-      unit,
-      l1,
-      category_id: null,
-    })
-    setName('')
-    setQuantity('1')
+    const result = await onAdd(
+      {
+        name: name.trim(),
+        quantity: parsedQty,
+        unit,
+        l1,
+        category_id: null,
+      },
+      { mergeIfDuplicate: false },
+    )
+
+    if (result.duplicate) {
+      setDuplicate(result.duplicate)
+      return
+    }
+
+    if (result.error) {
+      onError(`Failed to add item: ${result.error}`)
+      return
+    }
+
+    resetForm()
+    onOpenChange(false)
+  }
+
+  const handleDuplicateAction = async (mode: 'add' | 'replace') => {
+    if (!duplicate) return
+    const { error } = await onUpdateExisting(duplicate.id, { quantity: parsedQty, unit }, mode)
+    if (error) {
+      onError(`Failed to update item: ${error}`)
+      return
+    }
+    resetForm()
+    setDuplicate(null)
     onOpenChange(false)
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Add to shopping list</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
-          <div className="space-y-2">
-            <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} required />
-          </div>
-          <div className="space-y-2">
-            <Label>Type</Label>
-            <Select value={l1} onValueChange={(v) => setL1(v as ShoppingListL1)}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="pantry">Pantry</SelectItem>
-                <SelectItem value="supply">Supply</SelectItem>
-                <SelectItem value="general">Other (list only)</SelectItem>
-              </SelectContent>
-            </Select>
-            {isGeneral && (
-              <p className="text-sm text-muted-foreground">
-                Won&apos;t be added to Pantry or Supply — just check off when done.
-              </p>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2">
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(v) => {
+          if (!v) resetForm()
+          onOpenChange(v)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add to shopping list</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
             <div className="space-y-2">
-              <Label>Quantity</Label>
-              <Input
-                type="number"
-                step="any"
-                min="0"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-              />
+              <Label>Name</Label>
+              <Input value={name} onChange={(e) => setName(e.target.value)} required />
             </div>
             <div className="space-y-2">
-              <Label>Unit</Label>
-              <Select value={unit} onValueChange={setUnit}>
+              <Label>Type</Label>
+              <Select value={l1} onValueChange={(v) => setL1(v as ShoppingListL1)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {UNITS.map((u) => (
-                    <SelectItem key={u} value={u}>
-                      {u}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="pantry">Pantry</SelectItem>
+                  <SelectItem value="supply">Supply</SelectItem>
+                  <SelectItem value="general">Other (list only)</SelectItem>
                 </SelectContent>
               </Select>
+              {isGeneral && (
+                <p className="text-sm text-muted-foreground">
+                  Won&apos;t be added to Pantry or Supply — just check off when done.
+                </p>
+              )}
             </div>
-          </div>
-          <Button type="submit" className="w-full">
-            Add to list
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-2">
+                <Label>Quantity</Label>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0"
+                  value={quantity}
+                  onChange={(e) => setQuantity(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Unit</Label>
+                <Select value={unit} onValueChange={setUnit}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {UNITS.map((u) => (
+                      <SelectItem key={u} value={u}>
+                        {u}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <Button type="submit" className="w-full">
+              Add to list
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <DuplicateItemDialog
+        open={!!duplicate}
+        onOpenChange={(v) => !v && setDuplicate(null)}
+        itemName={duplicate?.name ?? ''}
+        existingQuantity={Number(duplicate?.quantity ?? 0)}
+        existingUnit={duplicate?.unit ?? ''}
+        newQuantity={parsedQty}
+        newUnit={unit}
+        onAddToExisting={() => void handleDuplicateAction('add')}
+        onReplace={() => void handleDuplicateAction('replace')}
+      />
+    </>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, Search, AlertTriangle } from 'lucide-react'
 import { useInventory } from '@/hooks/useInventory'
 import { useShoppingList } from '@/hooks/useShoppingList'
+import { useToast } from '@/hooks/useToast'
 import type { InventoryItemWithCategory, L1Category } from '@/types/database'
 import type { SortOption } from '@/lib/constants'
 import { isLowStock, isOutOfStock } from '@/lib/utils'
@@ -12,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState, LoadingSpinner } from '@/components/ui/empty-state'
 import { QuantityStepper } from '@/components/QuantityStepper'
+import { DuplicateItemDialog } from '@/components/DuplicateItemDialog'
 import {
   Select,
   SelectContent,
@@ -35,8 +37,9 @@ interface InventoryPageProps {
 }
 
 export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProps) {
-  const { items, loading, addItem, updateItem, deleteItem } = useInventory(l1)
+  const { items, loading, addItem, updateItem, updateExistingItem, deleteItem } = useInventory(l1)
   const { addToList } = useShoppingList()
+  const { showToast } = useToast()
 
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortOption>('name-asc')
@@ -88,6 +91,11 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
       return isLowStock(Number(item.quantity), item.low_stock_threshold)
     })
   }, [items])
+
+  const handleQuantityChange = async (item: InventoryItemWithCategory, quantity: number) => {
+    const { error } = await updateItem(item.id, { quantity })
+    if (error) showToast(`Failed to update quantity: ${error}`)
+  }
 
   const handleLowStockAction = async (
     item: InventoryItemWithCategory,
@@ -205,12 +213,10 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
               unit={item.unit}
               min={0}
                   onDecrement={() =>
-                    void updateItem(item.id, {
-                      quantity: Math.max(0, Number(item.quantity) - 1),
-                    })
+                    void handleQuantityChange(item, Math.max(0, Number(item.quantity) - 1))
                   }
                   onIncrement={() =>
-                    void updateItem(item.id, { quantity: Number(item.quantity) + 1 })
+                    void handleQuantityChange(item, Number(item.quantity) + 1)
                   }
                 />
               </li>
@@ -231,17 +237,47 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
         item={editingItem}
         onSave={async (data) => {
           if (editingItem) {
-            await updateItem(editingItem.id, { ...data, category_id: null })
+            const { error } = await updateItem(editingItem.id, { ...data, category_id: null })
+            if (error) {
+              showToast(`Failed to save item: ${error}`)
+              return null
+            }
           } else {
-            await addItem({ ...data, category_id: null })
+            const result = await addItem({ ...data, category_id: null }, { mergeIfDuplicate: false })
+            if (result.duplicate) {
+              return { duplicate: result.duplicate, data }
+            }
+            if (result.error) {
+              showToast(`Failed to add item: ${result.error}`)
+              return null
+            }
           }
           setShowAddDialog(false)
           setEditingItem(null)
+          return null
+        }}
+        onUpdateDuplicate={async (id, data, mode) => {
+          const { error } = await updateExistingItem(
+            id,
+            {
+              quantity: data.quantity,
+              unit: data.unit,
+              low_stock_threshold: data.low_stock_threshold,
+              notes: data.notes,
+            },
+            mode,
+          )
+          if (error) showToast(`Failed to update item: ${error}`)
+          else {
+            setShowAddDialog(false)
+            setEditingItem(null)
+          }
         }}
         onDelete={
           editingItem
             ? async () => {
-                await deleteItem(editingItem.id)
+                const { error } = await deleteItem(editingItem.id)
+                if (error) showToast(`Failed to delete item: ${error}`)
                 setEditingItem(null)
               }
             : undefined
@@ -294,18 +330,21 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
   )
 }
 
+type ItemFormData = {
+  name: string
+  quantity: number
+  unit: string
+  low_stock_threshold: number | null
+  notes?: string
+}
+
 interface ItemFormDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   l1: L1Category
   item: InventoryItemWithCategory | null
-  onSave: (data: {
-    name: string
-    quantity: number
-    unit: string
-    low_stock_threshold: number | null
-    notes?: string
-  }) => Promise<void>
+  onSave: (data: ItemFormData) => Promise<{ duplicate: InventoryItemWithCategory; data: ItemFormData } | null>
+  onUpdateDuplicate: (id: string, data: ItemFormData, mode: 'add' | 'replace') => Promise<void>
   onDelete?: () => Promise<void>
 }
 
@@ -314,6 +353,7 @@ function ItemFormDialog({
   onOpenChange,
   item,
   onSave,
+  onUpdateDuplicate,
   onDelete,
 }: ItemFormDialogProps) {
   const [name, setName] = useState('')
@@ -322,6 +362,8 @@ function ItemFormDialog({
   const [threshold, setThreshold] = useState('')
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [duplicate, setDuplicate] = useState<InventoryItemWithCategory | null>(null)
+  const [pendingData, setPendingData] = useState<ItemFormData | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -343,17 +385,30 @@ function ItemFormDialog({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
-    await onSave({
+    const data = {
       name: name.trim(),
       quantity: parseFloat(quantity) || 0,
       unit,
       low_stock_threshold: threshold ? parseFloat(threshold) : null,
       notes: notes || undefined,
-    })
+    }
+    const result = await onSave(data)
+    if (result?.duplicate) {
+      setDuplicate(result.duplicate)
+      setPendingData(data)
+    }
     setSubmitting(false)
   }
 
+  const handleDuplicateAction = async (mode: 'add' | 'replace') => {
+    if (!duplicate || !pendingData) return
+    await onUpdateDuplicate(duplicate.id, pendingData, mode)
+    setDuplicate(null)
+    setPendingData(null)
+  }
+
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
@@ -424,5 +479,23 @@ function ItemFormDialog({
         </form>
       </DialogContent>
     </Dialog>
+
+    <DuplicateItemDialog
+      open={!!duplicate}
+      onOpenChange={(v) => {
+        if (!v) {
+          setDuplicate(null)
+          setPendingData(null)
+        }
+      }}
+      itemName={duplicate?.name ?? ''}
+      existingQuantity={Number(duplicate?.quantity ?? 0)}
+      existingUnit={duplicate?.unit ?? ''}
+      newQuantity={pendingData?.quantity ?? 0}
+      newUnit={pendingData?.unit ?? ''}
+      onAddToExisting={() => void handleDuplicateAction('add')}
+      onReplace={() => void handleDuplicateAction('replace')}
+    />
+    </>
   )
 }

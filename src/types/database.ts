@@ -8,6 +8,7 @@ export type Json =
 
 export type L1Category = 'pantry' | 'supply'
 export type ShoppingListL1 = L1Category | 'general'
+export type RecipeL1Category = 'desserts' | 'starters' | 'entrees'
 export type HouseholdRole = 'owner' | 'member'
 
 export type Database = {
@@ -205,6 +206,9 @@ export type Database = {
           instructions: string
           prep_minutes: number | null
           cook_minutes: number | null
+          l1: RecipeL1Category | null
+          recipe_type: string | null
+          source_url: string | null
           created_at: string
           updated_at: string
         }
@@ -216,6 +220,9 @@ export type Database = {
           instructions?: string
           prep_minutes?: number | null
           cook_minutes?: number | null
+          l1?: RecipeL1Category | null
+          recipe_type?: string | null
+          source_url?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -227,10 +234,48 @@ export type Database = {
           instructions?: string
           prep_minutes?: number | null
           cook_minutes?: number | null
+          l1?: RecipeL1Category | null
+          recipe_type?: string | null
+          source_url?: string | null
           created_at?: string
           updated_at?: string
         }
         Relationships: []
+      }
+      recipe_images: {
+        Row: {
+          id: string
+          recipe_id: string
+          url: string
+          is_primary: boolean
+          sort_order: number
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          recipe_id: string
+          url: string
+          is_primary?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          recipe_id?: string
+          url?: string
+          is_primary?: boolean
+          sort_order?: number
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'recipe_images_recipe_id_fkey'
+            columns: ['recipe_id']
+            isOneToOne: false
+            referencedRelation: 'recipes'
+            referencedColumns: ['id']
+          },
+        ]
       }
       recipe_ingredients: {
         Row: {
@@ -422,6 +467,7 @@ export type InventoryItem = Database['public']['Tables']['inventory_items']['Row
 export type ShoppingListItem = Database['public']['Tables']['shopping_list_items']['Row']
 export type Recipe = Database['public']['Tables']['recipes']['Row']
 export type RecipeIngredient = Database['public']['Tables']['recipe_ingredients']['Row']
+export type RecipeImage = Database['public']['Tables']['recipe_images']['Row']
 export type RecipeMacros = Database['public']['Tables']['recipe_macros']['Row']
 export type ActivityLogEntry = Database['public']['Tables']['activity_log']['Row']
 
@@ -432,6 +478,28 @@ export type InventoryItemWithCategory = InventoryItem & {
 export type RecipeWithDetails = Recipe & {
   recipe_ingredients: RecipeIngredient[]
   recipe_macros: RecipeMacros | null
+  recipe_images: RecipeImage[]
+}
+
+export function hasRecipeMacros(
+  macros:
+    | RecipeMacros
+    | { calories?: number | null; protein_g?: number | null; carbs_g?: number | null; fat_g?: number | null }
+    | null
+    | undefined,
+): boolean {
+  if (!macros) return false
+  return (
+    macros.calories != null ||
+    macros.protein_g != null ||
+    macros.carbs_g != null ||
+    macros.fat_g != null
+  )
+}
+
+export function getPrimaryRecipeImage(images: RecipeImage[]): string | null {
+  const primary = images.find((img) => img.is_primary)
+  return primary?.url ?? images[0]?.url ?? null
 }
 
 export type HouseholdMemberWithHousehold = HouseholdMember & {
