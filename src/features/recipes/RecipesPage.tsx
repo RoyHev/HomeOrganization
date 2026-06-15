@@ -52,6 +52,24 @@ export function RecipesPage() {
   const [selectedRecipe, setSelectedRecipe] = useState<RecipeWithDetails | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [editingRecipe, setEditingRecipe] = useState<RecipeWithDetails | null>(null)
+  const [typeFilter, setTypeFilter] = useState<string | null>(null)
+
+  const typeFilters = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const recipe of recipes) {
+      const type = recipe.recipe_type?.trim()
+      if (!type) continue
+      const key = type.toLowerCase()
+      if (!seen.has(key)) seen.set(key, type)
+    }
+    return Array.from(seen.values()).sort((a, b) => a.localeCompare(b))
+  }, [recipes])
+
+  const filteredRecipes = useMemo(() => {
+    if (!typeFilter) return recipes
+    const key = typeFilter.toLowerCase()
+    return recipes.filter((r) => r.recipe_type?.trim().toLowerCase() === key)
+  }, [recipes, typeFilter])
 
   const groupedRecipes = useMemo(() => {
     const groups: Record<string, RecipeWithDetails[]> = {
@@ -60,7 +78,7 @@ export function RecipesPage() {
       desserts: [],
       other: [],
     }
-    for (const recipe of recipes) {
+    for (const recipe of filteredRecipes) {
       if (recipe.l1 && groups[recipe.l1]) {
         groups[recipe.l1].push(recipe)
       } else {
@@ -68,7 +86,10 @@ export function RecipesPage() {
       }
     }
     return groups
-  }, [recipes])
+  }, [filteredRecipes])
+
+  const hasVisibleRecipes = RECIPE_L1_ORDER.some((l1) => groupedRecipes[l1].length > 0)
+    || groupedRecipes.other.length > 0
 
   const handleAddMissingToList = async (recipe: RecipeWithDetails) => {
     for (const ing of recipe.recipe_ingredients) {
@@ -110,6 +131,30 @@ export function RecipesPage() {
         </Button>
       </div>
 
+      {typeFilters.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          <Button
+            variant={typeFilter === null ? 'default' : 'outline'}
+            size="sm"
+            className="shrink-0"
+            onClick={() => setTypeFilter(null)}
+          >
+            All
+          </Button>
+          {typeFilters.map((type) => (
+            <Button
+              key={type}
+              variant={typeFilter === type ? 'default' : 'outline'}
+              size="sm"
+              className="shrink-0"
+              onClick={() => setTypeFilter(type)}
+            >
+              {type}
+            </Button>
+          ))}
+        </div>
+      )}
+
       {recipes.length === 0 ? (
         <EmptyState
           icon={ChefHat}
@@ -119,6 +164,17 @@ export function RecipesPage() {
             <Button onClick={() => setShowForm(true)}>
               <Plus className="h-4 w-4" />
               Add first recipe
+            </Button>
+          }
+        />
+      ) : !hasVisibleRecipes ? (
+        <EmptyState
+          icon={ChefHat}
+          title="No recipes match this filter"
+          description={`No recipes tagged "${typeFilter}". Try another type or show all.`}
+          action={
+            <Button variant="outline" onClick={() => setTypeFilter(null)}>
+              Show all recipes
             </Button>
           }
         />
@@ -201,6 +257,15 @@ function RecipeGroup({
       <ul className="space-y-2">
         {recipes.map((recipe) => {
           const imageUrl = getPrimaryRecipeImage(recipe.recipe_images ?? [])
+          const meta = [
+            `${recipe.servings} servings`,
+            recipe.prep_minutes != null ? `${recipe.prep_minutes}m prep` : null,
+            recipe.cook_minutes != null ? `${recipe.cook_minutes}m cook` : null,
+            `${recipe.recipe_ingredients.length} ingredients`,
+          ]
+            .filter(Boolean)
+            .join(' · ')
+
           return (
             <li key={recipe.id}>
               <Card
@@ -208,50 +273,23 @@ function RecipeGroup({
                 onClick={() => onSelect(recipe)}
               >
                 <CardContent className="p-0">
-                  <div className="flex items-center">
-                    {imageUrl && (
-                      <div className="w-20 h-20 shrink-0 ml-3">
-                        <img
-                          src={imageUrl}
-                          alt=""
-                          className="w-full h-full object-cover"
-                        />
-                      </div>
-                    )}
-                    <div className="p-4 min-w-0 flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="font-medium">{recipe.title}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {recipe.servings} servings
-                            {recipe.prep_minutes != null && ` · ${recipe.prep_minutes}m prep`}
-                            {recipe.cook_minutes != null && ` · ${recipe.cook_minutes}m cook`}
-                          </p>
-                          {recipe.recipe_type && (
-                            <Badge variant="outline" className="mt-1">
-                              {recipe.recipe_type}
-                            </Badge>
-                          )}
-                          {hasRecipeMacros(recipe.recipe_macros) && (
-                            <div className="flex flex-wrap gap-1 mt-2">
-                              {recipe.recipe_macros?.calories != null && (
-                                <Badge variant="secondary">
-                                  {recipe.recipe_macros.calories} cal
-                                </Badge>
-                              )}
-                              {recipe.recipe_macros?.protein_g != null && (
-                                <Badge variant="outline">
-                                  {recipe.recipe_macros.protein_g}g protein
-                                </Badge>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <Badge variant="secondary">
-                          {recipe.recipe_ingredients.length} ingredients
-                        </Badge>
-                      </div>
+                  {imageUrl && (
+                    <div className="aspect-[2/1] w-full overflow-hidden">
+                      <img
+                        src={imageUrl}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
                     </div>
+                  )}
+                  <div className="p-3">
+                    <p className="font-medium leading-snug">{recipe.title}</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{meta}</p>
+                    {recipe.recipe_type && (
+                      <Badge variant="outline" className="mt-2">
+                        {recipe.recipe_type}
+                      </Badge>
+                    )}
                   </div>
                 </CardContent>
               </Card>
