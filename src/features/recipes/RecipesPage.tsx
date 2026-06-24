@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, ChefHat, Trash2, ShoppingCart, Link as LinkIcon, ImagePlus, Star } from 'lucide-react'
+import { Plus, ChefHat, Trash2, ShoppingCart, Link as LinkIcon, ImagePlus, Star, Sparkles } from 'lucide-react'
 import { useRecipes } from '@/hooks/useRecipes'
 import { useInventory } from '@/hooks/useInventory'
 import { useShoppingList } from '@/hooks/useShoppingList'
@@ -7,6 +7,7 @@ import { useToast } from '@/hooks/useToast'
 import type { RecipeL1Category, RecipeWithDetails } from '@/types/database'
 import { getPrimaryRecipeImage, hasRecipeMacros } from '@/types/database'
 import { RECIPE_L1_CATEGORIES, UNITS } from '@/lib/constants'
+import { invokeEdgeFunction } from '@/lib/functions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -27,7 +28,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
-import { cn } from '@/lib/utils'
+import { cn, parseInstructionSteps } from '@/lib/utils'
 
 type IngredientForm = {
   name: string
@@ -53,6 +54,7 @@ export function RecipesPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingRecipe, setEditingRecipe] = useState<RecipeWithDetails | null>(null)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [showImport, setShowImport] = useState(false)
 
   const typeFilters = useMemo(() => {
     const seen = new Map<string, string>()
@@ -119,16 +121,26 @@ export function RecipesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">Recipes</h2>
-        <Button
-          size="sm"
-          onClick={() => {
-            setEditingRecipe(null)
-            setShowForm(true)
-          }}
-        >
-          <Plus className="h-4 w-4" />
-          Add
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowImport(true)}
+          >
+            <Sparkles className="h-4 w-4" />
+            Import
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditingRecipe(null)
+              setShowForm(true)
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            Add
+          </Button>
+        </div>
       </div>
 
       {typeFilters.length > 0 && (
@@ -236,6 +248,16 @@ export function RecipesPage() {
             setShowForm(false)
             setEditingRecipe(null)
           }
+        }}
+      />
+
+      <ImportRecipeDialog
+        open={showImport}
+        onOpenChange={setShowImport}
+        onImported={(parsed) => {
+          setShowImport(false)
+          setEditingRecipe(parsed as unknown as RecipeWithDetails)
+          setShowForm(true)
         }}
       />
     </div>
@@ -380,9 +402,13 @@ function RecipeDetailDialog({
           {recipe.instructions && (
             <div>
               <p className="text-sm font-medium mb-2">Instructions</p>
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                {recipe.instructions}
-              </p>
+              <ol className="list-decimal list-outside ml-4 space-y-2 text-sm text-muted-foreground">
+                {parseInstructionSteps(recipe.instructions).map((step, i) => (
+                  <li key={i} className="pl-1 leading-relaxed">
+                    {step}
+                  </li>
+                ))}
+              </ol>
             </div>
           )}
 
@@ -676,9 +702,14 @@ function RecipeFormDialog({
           <div>
             <Label className="mb-2 block">Images</Label>
             {images.length > 0 && (
+              <p className="text-xs text-muted-foreground mb-2">
+                Tap the star for primary, trash to remove irrelevant photos.
+              </p>
+            )}
+            {images.length > 0 && (
               <div className="grid grid-cols-3 gap-2 mb-3">
                 {images.map((img, idx) => (
-                  <div key={idx} className="relative group">
+                  <div key={idx} className="relative">
                     <img
                       src={img.url}
                       alt=""
@@ -687,13 +718,13 @@ function RecipeFormDialog({
                         img.is_primary && 'ring-2 ring-primary',
                       )}
                     />
-                    <div className="absolute inset-0 flex items-end justify-between p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="absolute top-1 right-1 flex gap-0.5">
                       <button
                         type="button"
                         onClick={() => setPrimaryImage(idx)}
                         className={cn(
-                          'rounded-full p-1 bg-background/80',
-                          img.is_primary && 'text-primary',
+                          'rounded-full p-1.5 bg-background/90 shadow-sm border',
+                          img.is_primary ? 'text-primary' : 'text-muted-foreground',
                         )}
                         title="Set as primary"
                       >
@@ -702,14 +733,14 @@ function RecipeFormDialog({
                       <button
                         type="button"
                         onClick={() => removeImage(idx)}
-                        className="rounded-full p-1 bg-background/80 text-destructive"
-                        title="Remove"
+                        className="rounded-full p-1.5 bg-background/90 shadow-sm border text-destructive"
+                        title="Remove image"
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>
                     </div>
                     {img.is_primary && (
-                      <span className="absolute top-1 left-1 text-[10px] bg-primary text-primary-foreground px-1 rounded">
+                      <span className="absolute bottom-1 left-1 text-[10px] bg-primary text-primary-foreground px-1 rounded">
                         Primary
                       </span>
                     )}
@@ -873,6 +904,207 @@ function RecipeFormDialog({
             {submitting ? 'Saving…' : 'Save recipe'}
           </Button>
         </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+type ParsedRecipe = {
+  title: string
+  servings: number
+  prep_minutes: number | null
+  cook_minutes: number | null
+  l1: RecipeL1Category | null
+  recipe_type: string | null
+  source_url: string | null
+  instructions: string
+  instruction_steps?: string[]
+  ingredients: Array<{ name: string; quantity: number; unit: string }>
+  images?: Array<{ url: string; is_primary: boolean }>
+  macros: {
+    calories: number | null
+    protein_g: number | null
+    carbs_g: number | null
+    fat_g: number | null
+  }
+}
+
+function ImportRecipeDialog({
+  open,
+  onOpenChange,
+  onImported,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onImported: (recipe: Partial<RecipeWithDetails> & { _parsed: ParsedRecipe }) => void
+}) {
+  const [mode, setMode] = useState<'url' | 'text'>('url')
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const reset = () => {
+    setInput('')
+    setError(null)
+    setLoading(false)
+  }
+
+  const handleImport = async () => {
+    const trimmed = input.trim()
+    if (!trimmed) return
+    setLoading(true)
+    setError(null)
+
+    const { data, error: fnError } = await invokeEdgeFunction<{ recipe: ParsedRecipe }>(
+      'parse-recipe',
+      { input: trimmed, type: mode },
+    )
+
+    setLoading(false)
+
+    if (fnError || !data?.recipe) {
+      setError(fnError ?? 'Could not parse the recipe. Try pasting the text instead.')
+      return
+    }
+
+    const parsed = data.recipe
+    const parsedImages = parsed.images ?? []
+
+    // Shape it so RecipeFormDialog can pre-fill — pass as a fake RecipeWithDetails
+    const partial = {
+      _parsed: parsed,
+      id: undefined,
+      title: parsed.title ?? '',
+      servings: parsed.servings ?? 4,
+      instructions: parsed.instructions ?? '',
+      prep_minutes: parsed.prep_minutes ?? null,
+      cook_minutes: parsed.cook_minutes ?? null,
+      l1: parsed.l1 ?? null,
+      recipe_type: parsed.recipe_type ?? null,
+      source_url: parsed.source_url ?? (mode === 'url' ? trimmed : null),
+      recipe_ingredients: (parsed.ingredients ?? []).map((ing, i) => ({
+        id: `temp-${i}`,
+        recipe_id: '',
+        name: ing.name,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        inventory_item_id: null,
+        sort_order: i,
+      })),
+      recipe_macros: parsed.macros ?? null,
+      recipe_images: parsedImages.map((img, i) => ({
+        id: `temp-img-${i}`,
+        recipe_id: '',
+        url: img.url,
+        is_primary: img.is_primary,
+        sort_order: i,
+        created_at: '',
+      })),
+      household_id: '',
+      created_at: '',
+      updated_at: '',
+    }
+
+    reset()
+    onOpenChange(false)
+    onImported(partial as unknown as Partial<RecipeWithDetails> & { _parsed: ParsedRecipe })
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) reset()
+        onOpenChange(v)
+      }}
+    >
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            Import recipe with AI
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex rounded-lg border overflow-hidden">
+            <button
+              type="button"
+              className={cn(
+                'flex-1 py-2 text-sm font-medium transition-colors',
+                mode === 'url'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-accent',
+              )}
+              onClick={() => setMode('url')}
+            >
+              From URL
+            </button>
+            <button
+              type="button"
+              className={cn(
+                'flex-1 py-2 text-sm font-medium transition-colors',
+                mode === 'text'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-accent',
+              )}
+              onClick={() => setMode('text')}
+            >
+              Paste text
+            </button>
+          </div>
+
+          {mode === 'url' ? (
+            <div className="space-y-2">
+              <Label>Recipe URL</Label>
+              <Input
+                type="url"
+                placeholder="https://..."
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                autoFocus
+              />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label>Recipe text</Label>
+              <Textarea
+                placeholder="Paste the recipe here — ingredients, instructions, anything…"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                rows={6}
+                autoFocus
+              />
+            </div>
+          )}
+
+          {error && (
+            <p className="text-sm text-destructive">{error}</p>
+          )}
+
+          <Button
+            className="w-full"
+            onClick={() => void handleImport()}
+            disabled={loading || !input.trim()}
+          >
+            {loading ? (
+              <span className="flex items-center gap-2">
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+                Parsing…
+              </span>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Parse recipe
+              </>
+            )}
+          </Button>
+          <p className="text-xs text-muted-foreground text-center">
+            AI will extract the recipe — you can review and edit before saving.
+          </p>
+        </div>
       </DialogContent>
     </Dialog>
   )

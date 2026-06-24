@@ -29,3 +29,32 @@ export function isLowStock(quantity: number, threshold: number | null): boolean 
 export function isOutOfStock(quantity: number): boolean {
   return quantity <= 0
 }
+
+/** Split stored recipe instructions into display steps. */
+export function parseInstructionSteps(instructions: string): string[] {
+  const text = instructions.trim()
+  if (!text) return []
+
+  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean)
+
+  // Multiple lines — treat each as a step (strip leading numbers/bullets)
+  if (lines.length > 1) {
+    return lines.map((line) => line.replace(/^\s*(\d+[\.\):\-]\s*|[-•*]\s+)/, '').trim()).filter(Boolean)
+  }
+
+  // Single block — split on numbered patterns like "1. " or "2) "
+  const numbered = text.split(/(?=\s*\d+[\.\)]\s+)/).map((s) => s.trim()).filter(Boolean)
+  if (numbered.length > 1) {
+    return numbered.map((s) => s.replace(/^\d+[\.\)]\s*/, '').trim()).filter(Boolean)
+  }
+
+  // Split long paragraphs on sentence boundaries as a last resort
+  if (text.length > 120) {
+    const sentences = text.match(/[^.!?]+[.!?]+/g)
+    if (sentences && sentences.length > 1) {
+      return sentences.map((s) => s.trim()).filter(Boolean)
+    }
+  }
+
+  return [text]
+}
