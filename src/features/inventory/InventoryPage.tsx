@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Search, AlertTriangle } from 'lucide-react'
+import { Plus, Search, AlertTriangle, PackageX } from 'lucide-react'
 import { useInventory } from '@/hooks/useInventory'
 import { useShoppingList } from '@/hooks/useShoppingList'
 import { useToast } from '@/hooks/useToast'
@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { EmptyState, LoadingSpinner } from '@/components/ui/empty-state'
 import { QuantityStepper } from '@/components/QuantityStepper'
+import { SwipeToDelete } from '@/components/SwipeToDelete'
 import { DuplicateItemDialog } from '@/components/DuplicateItemDialog'
 import {
   Select,
@@ -84,17 +85,31 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
     return result
   }, [items, search, sort])
 
-  const lowStockItems = useMemo(() => {
+  const outOfStockItems = useMemo(() => {
     const now = new Date()
     return items.filter((item) => {
       if (item.snoozed_until && new Date(item.snoozed_until) > now) return false
-      return isLowStock(Number(item.quantity), item.low_stock_threshold)
+      return isOutOfStock(Number(item.quantity))
+    })
+  }, [items])
+
+  const runningLowItems = useMemo(() => {
+    const now = new Date()
+    return items.filter((item) => {
+      if (item.snoozed_until && new Date(item.snoozed_until) > now) return false
+      const qty = Number(item.quantity)
+      return !isOutOfStock(qty) && isLowStock(qty, item.low_stock_threshold)
     })
   }, [items])
 
   const handleQuantityChange = async (item: InventoryItemWithCategory, quantity: number) => {
     const { error } = await updateItem(item.id, { quantity })
     if (error) showToast(`Failed to update quantity: ${error}`)
+  }
+
+  const handleDelete = async (id: string) => {
+    const { error } = await deleteItem(id)
+    if (error) showToast(`Failed to delete item: ${error}`)
   }
 
   const handleLowStockAction = async (
@@ -131,16 +146,39 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
         </Button>
       </div>
 
-      {lowStockItems.length > 0 && (
+      {outOfStockItems.length > 0 && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <PackageX className="h-4 w-4 text-destructive" />
+            <p className="text-sm font-medium">
+              {outOfStockItems.length} item{outOfStockItems.length !== 1 ? 's' : ''} out of stock
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {outOfStockItems.slice(0, 5).map((item) => (
+              <Button
+                key={item.id}
+                variant="outline"
+                size="sm"
+                onClick={() => setLowStockPrompt(item)}
+              >
+                {item.name}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {runningLowItems.length > 0 && (
         <div className="rounded-xl border border-warning/30 bg-warning/5 p-4">
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle className="h-4 w-4 text-warning-foreground" />
             <p className="text-sm font-medium">
-              {lowStockItems.length} item{lowStockItems.length !== 1 ? 's' : ''} running low
+              {runningLowItems.length} item{runningLowItems.length !== 1 ? 's' : ''} running low
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {lowStockItems.slice(0, 5).map((item) => (
+            {runningLowItems.slice(0, 5).map((item) => (
               <Button
                 key={item.id}
                 variant="outline"
@@ -196,29 +234,32 @@ export function InventoryPage({ l1, title, emptyDescription }: InventoryPageProp
             const outOfStock = isOutOfStock(Number(item.quantity))
             const low = isLowStock(Number(item.quantity), item.low_stock_threshold)
             return (
-              <li
-                key={item.id}
-                className="flex items-center justify-between rounded-xl border bg-card p-4 cursor-pointer active:bg-accent/50 transition-colors"
-                onClick={() => setEditingItem(item)}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="font-medium truncate">{item.name}</p>
-                    {outOfStock && <Badge variant="destructive">Out</Badge>}
-                    {!outOfStock && low && <Badge variant="warning">Low</Badge>}
+              <li key={item.id}>
+                <SwipeToDelete onDelete={() => void handleDelete(item.id)}>
+                  <div
+                    className="flex items-center justify-between border bg-card p-4 cursor-pointer active:bg-accent/50 transition-colors"
+                    onClick={() => setEditingItem(item)}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium truncate">{item.name}</p>
+                        {outOfStock && <Badge variant="destructive">Out</Badge>}
+                        {!outOfStock && low && <Badge variant="warning">Low</Badge>}
+                      </div>
+                    </div>
+                    <QuantityStepper
+                      value={Number(item.quantity)}
+                      unit={item.unit}
+                      min={0}
+                      onDecrement={() =>
+                        void handleQuantityChange(item, Math.max(0, Number(item.quantity) - 1))
+                      }
+                      onIncrement={() =>
+                        void handleQuantityChange(item, Number(item.quantity) + 1)
+                      }
+                    />
                   </div>
-                </div>
-            <QuantityStepper
-              value={Number(item.quantity)}
-              unit={item.unit}
-              min={0}
-                  onDecrement={() =>
-                    void handleQuantityChange(item, Math.max(0, Number(item.quantity) - 1))
-                  }
-                  onIncrement={() =>
-                    void handleQuantityChange(item, Number(item.quantity) + 1)
-                  }
-                />
+                </SwipeToDelete>
               </li>
             )
           })}
@@ -410,7 +451,7 @@ function ItemFormDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent onOpenAutoFocus={item ? (e) => e.preventDefault() : undefined}>
         <DialogHeader>
           <DialogTitle>{item ? 'Edit item' : 'Add item'}</DialogTitle>
         </DialogHeader>

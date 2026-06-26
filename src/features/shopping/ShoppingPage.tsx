@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { EmptyState, LoadingSpinner } from '@/components/ui/empty-state'
 import { QuantityStepper } from '@/components/QuantityStepper'
+import { SwipeToDelete } from '@/components/SwipeToDelete'
 import { DuplicateItemDialog } from '@/components/DuplicateItemDialog'
 import {
   Select,
@@ -26,8 +27,15 @@ import {
 } from '@/components/ui/dialog'
 
 export function ShoppingPage() {
-  const { items, loading, addToList, updateExistingItem, updateListQuantity, completePurchase } =
-    useShoppingList()
+  const {
+    items,
+    loading,
+    addToList,
+    updateExistingItem,
+    updateListQuantity,
+    completePurchase,
+    removeFromList,
+  } = useShoppingList()
   const { showToast } = useToast()
 
   const [search, setSearch] = useState('')
@@ -59,6 +67,11 @@ export function ShoppingPage() {
   const handleQuantityChange = async (id: string, quantity: number) => {
     const { error } = await updateListQuantity(id, quantity)
     if (error) showToast(`Failed to update quantity: ${error}`)
+  }
+
+  const handleDelete = async (id: string) => {
+    const { error } = await removeFromList(id)
+    if (error) showToast(`Failed to remove item: ${error}`)
   }
 
   const handleItemCheck = (item: ShoppingListItemWithMeta) => {
@@ -139,6 +152,7 @@ export function ShoppingPage() {
               items={grouped.pantry}
               onCheck={handleItemCheck}
               onUpdateQuantity={handleQuantityChange}
+              onDelete={handleDelete}
             />
           )}
           {grouped.supply.length > 0 && (l1Filter === 'all' || l1Filter === 'supply') && (
@@ -147,6 +161,7 @@ export function ShoppingPage() {
               items={grouped.supply}
               onCheck={handleItemCheck}
               onUpdateQuantity={handleQuantityChange}
+              onDelete={handleDelete}
             />
           )}
           {grouped.general.length > 0 && (l1Filter === 'all' || l1Filter === 'general') && (
@@ -155,6 +170,7 @@ export function ShoppingPage() {
               items={grouped.general}
               onCheck={handleItemCheck}
               onUpdateQuantity={handleQuantityChange}
+              onDelete={handleDelete}
             />
           )}
         </div>
@@ -220,39 +236,42 @@ function ShoppingGroup({
   items,
   onCheck,
   onUpdateQuantity,
+  onDelete,
 }: {
   title: string
   items: ShoppingListItemWithMeta[]
   onCheck: (item: ShoppingListItemWithMeta) => void
   onUpdateQuantity: (id: string, quantity: number) => void
+  onDelete: (id: string) => void
 }) {
   return (
     <section>
       <h3 className="text-sm font-medium text-muted-foreground mb-2">{title}</h3>
       <ul className="space-y-2">
         {items.map((item) => (
-          <li
-            key={item.id}
-            className="flex items-center gap-3 rounded-xl border bg-card p-4"
-          >
-            <div className="min-w-0 flex-1">
-              <p className="font-medium">{item.name}</p>
-            </div>
-            <QuantityStepper
-              value={Number(item.quantity)}
-              unit={item.unit}
-              onDecrement={() => onUpdateQuantity(item.id, Number(item.quantity) - 1)}
-              onIncrement={() => onUpdateQuantity(item.id, Number(item.quantity) + 1)}
-            />
-            <Button
-              variant="outline"
-              size="icon"
-              className="shrink-0"
-              onClick={() => onCheck(item)}
-              title={item.l1 === 'general' ? 'Check off' : 'Mark as purchased'}
-            >
-              <Check className="h-4 w-4" />
-            </Button>
+          <li key={item.id}>
+            <SwipeToDelete onDelete={() => void onDelete(item.id)}>
+              <div className="flex items-center gap-3 border bg-card p-4">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{item.name}</p>
+                </div>
+                <QuantityStepper
+                  value={Number(item.quantity)}
+                  unit={item.unit}
+                  onDecrement={() => onUpdateQuantity(item.id, Number(item.quantity) - 1)}
+                  onIncrement={() => onUpdateQuantity(item.id, Number(item.quantity) + 1)}
+                />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={() => onCheck(item)}
+                  title={item.l1 === 'general' ? 'Check off' : 'Mark as purchased'}
+                >
+                  <Check className="h-4 w-4" />
+                </Button>
+              </div>
+            </SwipeToDelete>
           </li>
         ))}
       </ul>
