@@ -11,6 +11,7 @@ import { ShoppingPage } from '@/features/shopping/ShoppingPage'
 import { RecipesPage } from '@/features/recipes/RecipesPage'
 import { SupplyPage } from '@/features/supply/SupplyPage'
 import { AdminPage } from '@/features/admin/AdminPage'
+import { SettingsPage } from '@/features/settings/SettingsPage'
 import { PlatformAdminPage } from '@/features/platform-admin/PlatformAdminPage'
 import { PlatformAdminProvider } from '@/hooks/usePlatformAdmin'
 import { RootRedirect } from '@/components/RootRedirect'
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/shopping" element={<ShoppingPage />} />
               <Route path="/recipes" element={<RecipesPage />} />
               <Route path="/supply" element={<SupplyPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
               <Route path="/admin" element={<AdminPage />} />
             </Route>
             <Route path="*" element={<RootRedirect />} />

@@ -19,6 +19,8 @@ export function SwipeToDelete({ children, onDelete, className }: SwipeToDeletePr
   const [offset, setOffset] = useState(0)
   const [dragging, setDragging] = useState(false)
 
+  const isOpen = offset < 0
+
   const clampOffset = useCallback((value: number) => Math.max(-DELETE_WIDTH, Math.min(0, value)), [])
 
   const snapOffset = useCallback(
@@ -58,7 +60,9 @@ export function SwipeToDelete({ children, onDelete, className }: SwipeToDeletePr
       e.preventDefault()
       e.stopPropagation()
       didDrag.current = false
+      return
     }
+    if (isOpen) reset()
   }
 
   const handleDelete = () => {
@@ -69,14 +73,19 @@ export function SwipeToDelete({ children, onDelete, className }: SwipeToDeletePr
   return (
     <div className={cn('relative overflow-hidden rounded-xl', className)}>
       <div
-        className="absolute inset-y-0 right-0 flex items-center justify-center bg-destructive text-destructive-foreground"
+        className={cn(
+          'absolute inset-y-0 right-0 flex items-center justify-center bg-destructive text-destructive-foreground transition-opacity duration-150',
+          isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none',
+        )}
         style={{ width: DELETE_WIDTH }}
+        aria-hidden={!isOpen}
       >
         <button
           type="button"
           onClick={handleDelete}
           className="flex h-full w-full items-center justify-center"
           aria-label="Delete"
+          tabIndex={isOpen ? 0 : -1}
         >
           <Trash2 className="h-5 w-5" />
         </button>
@@ -85,7 +94,7 @@ export function SwipeToDelete({ children, onDelete, className }: SwipeToDeletePr
       <div
         ref={trackRef}
         className={cn(
-          'relative touch-pan-y select-none',
+          'relative touch-pan-y select-none bg-card',
           !dragging && 'transition-transform duration-200 ease-out',
         )}
         style={{ transform: `translateX(${offset}px)` }}

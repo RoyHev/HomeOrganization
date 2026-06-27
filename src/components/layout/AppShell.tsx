@@ -1,57 +1,27 @@
-import { Outlet, Navigate, useNavigate } from 'react-router-dom'
+import { Outlet, Navigate } from 'react-router-dom'
 import { BottomNav } from './BottomNav'
+import { HeaderMenu } from './HeaderMenu'
 import { useAuth } from '@/hooks/useAuth'
 import { useHousehold } from '@/hooks/useHousehold'
 import { LoadingSpinner } from '@/components/ui/empty-state'
-import { LogOut, Settings, Shield } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { usePlatformAdmin } from '@/hooks/usePlatformAdmin'
 
 export function AppShell() {
-  const { user, signOut, needsPasswordSetup } = useAuth()
-  const { household, membership, loading } = useHousehold()
-  const { isPlatformAdmin } = usePlatformAdmin()
-  const navigate = useNavigate()
+  const { user, needsPasswordSetup } = useAuth()
+  const { household, loading } = useHousehold()
 
   if (loading) return <LoadingSpinner />
   if (!user) return <Navigate to="/login" replace />
   if (needsPasswordSetup) return <Navigate to="/set-password" replace />
   if (!household) return <Navigate to="/household" replace />
 
-  const isOwner = membership?.role === 'owner'
-
   return (
     <div className="min-h-dvh pb-[72px]">
       <header className="sticky top-0 z-30 border-b bg-background/95 backdrop-blur safe-top">
-        <div className="mx-auto flex max-w-lg items-center justify-between px-4 py-3">
-          <div>
+        <div className="mx-auto flex max-w-lg items-center gap-3 px-4 py-3">
+          <HeaderMenu />
+          <div className="min-w-0 flex-1">
             <p className="text-xs text-muted-foreground">Household</p>
-            <h1 className="text-base font-semibold">{household.name}</h1>
-          </div>
-          <div className="flex items-center gap-1">
-            {isPlatformAdmin && (
-              <Button
-                variant="ghost"
-                size="icon"
-                title="Platform admin"
-                onClick={() => navigate('/platform-admin')}
-              >
-                <Shield className="h-5 w-5" />
-              </Button>
-            )}
-            {isOwner && (
-              <Button
-                variant="ghost"
-                size="icon"
-                title="Admin settings"
-                onClick={() => navigate('/admin')}
-              >
-                <Settings className="h-5 w-5" />
-              </Button>
-            )}
-            <Button variant="ghost" size="icon" onClick={() => void signOut()}>
-              <LogOut className="h-5 w-5" />
-            </Button>
+            <h1 className="truncate text-base font-semibold">{household.name}</h1>
           </div>
         </div>
       </header>

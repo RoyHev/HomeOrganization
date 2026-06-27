@@ -371,6 +371,33 @@ export type Database = {
         }
         Relationships: []
       }
+      shortcut_tokens: {
+        Row: {
+          id: string
+          user_id: string
+          household_id: string
+          token_hash: string
+          created_at: string
+          last_used_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          household_id: string
+          token_hash: string
+          created_at?: string
+          last_used_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          household_id?: string
+          token_hash?: string
+          created_at?: string
+          last_used_at?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: Record<string, never>
     Functions: {
@@ -453,6 +480,18 @@ export type Database = {
       create_household: {
         Args: { p_name: string; p_invite_code: string }
         Returns: string
+      }
+      create_shortcut_token: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
+      has_shortcut_token: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
+      revoke_shortcut_token: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
       }
     }
     Enums: Record<string, never>
